@@ -1,0 +1,198 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NAVI Case Label</title>
+<!--
+  The README header: the case label of the Tachibana Labs NAVI (Serial Experiments Lain),
+  re-lettered for Owari Labs. Self-contained: no network, system fonts only
+  (Avenir Next Condensed and Menlo, both ship with macOS).
+  Rendered to docs/header.jpg by screenshotting #label in Chrome at deviceScaleFactor 2. docs/social-preview.png
+  (GitHub's 1280x640 card) is the same label at height 480px with .ink at top 126px, deviceScaleFactor 4/3.
+-->
+<style>
+  :root {
+    --ink: #2b2b2b;
+    --pad-x: 66px;
+  }
+  html, body { margin: 0; }
+  body { min-height: 100vh; display: grid; place-items: center; background: #777774; }
+
+  #label {
+    position: relative;
+    width: 960px;
+    height: 340px;
+    overflow: hidden;
+    isolation: isolate;
+    /* light falls from the upper left */
+    background:
+      radial-gradient(130% 160% at 18% 12%, #cbcbc8 0%, #c2c2bf 42%, #b5b5b2 78%, #adadaa 100%);
+  }
+  #label > .layer { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+  .mottle  { mix-blend-mode: soft-light; opacity: .30; }
+  .brush   { mix-blend-mode: overlay;    opacity: .16; }
+  .grain   { mix-blend-mode: overlay;    opacity: .13; }
+  /* the brushing catches the light in a broad soft band across the brush direction */
+  .sheen {
+    mix-blend-mode: soft-light;
+    background: linear-gradient(104deg, rgba(255,255,255,0) 44%, rgba(255,255,255,.34) 63%, rgba(255,255,255,0) 84%);
+  }
+  .vignette {
+    mix-blend-mode: multiply;
+    background: radial-gradient(120% 150% at 34% 38%, rgba(0,0,0,0) 52%, rgba(52,52,50,.15) 100%);
+  }
+
+  /* ---- the print ---- */
+  .ink {
+    position: absolute;
+    left: var(--pad-x);
+    top: 56px;
+    color: var(--ink);
+    filter: url(#ink);
+    -webkit-font-smoothing: antialiased;
+    font-family: "Avenir Next Condensed", "Avenir Next", "Helvetica Neue", Arial, sans-serif;
+    font-kerning: normal;
+    white-space: nowrap;
+  }
+  .ink > * { display: block; margin: 0; line-height: 1; }
+
+  /* Block glyphs tile at line-height 1 with no letter-spacing; the hairline stroke closes the
+     antialiasing seams between neighbouring cells so the mark prints as solid shapes. */
+  .mark {
+    font: 9px/1 Menlo, "DejaVu Sans Mono", monospace;
+    letter-spacing: 0;
+    -webkit-text-stroke: .5px var(--ink);
+  }
+  /* margins set ink-to-ink: mark 14 maker 18 title, rule 5 under the descender, 14, 16 */
+  .maker  { font-size: 20px; font-weight: 400; letter-spacing: .012em; margin-top: 13px; margin-left: -.075em; }
+  .title  { font-size: 64px; font-weight: 700; letter-spacing: -.004em; margin-top: 7px; margin-left: -.063em; }
+  .rule   { height: 2px; background: var(--ink); width: 0; margin-top: 8px; }
+  .series { font-size: 31px; font-weight: 400; letter-spacing: .006em; margin-top: 12px; margin-left: -.05em; }
+  .year   { font-size: 17px; font-weight: 500; letter-spacing: .02em;  margin-top: 9px;  margin-left: -.1em; }
+</style>
+</head>
+<body>
+<div id="label" role="img" aria-label="Owari Labs™ · NAVI - Agent NAVIgator · Council Series · 1998">
+
+  <svg class="layer mottle" viewBox="0 0 960 340" preserveAspectRatio="none" aria-hidden="true">
+    <filter id="f-mottle" x="0" y="0" width="100%" height="100%" color-interpolation-filters="sRGB">
+      <feTurbulence type="fractalNoise" baseFrequency="0.004 0.009" numOctaves="4" seed="17"/>
+      <feColorMatrix type="matrix" values="1 0 0 0 0  1 0 0 0 0  1 0 0 0 0  0 0 0 0 1"/>
+    </filter>
+    <rect width="960" height="340" filter="url(#f-mottle)"/>
+  </svg>
+
+  <svg class="layer brush" viewBox="0 0 960 340" preserveAspectRatio="none" aria-hidden="true">
+    <filter id="f-brush" x="0" y="0" width="100%" height="100%" color-interpolation-filters="sRGB">
+      <feTurbulence type="fractalNoise" baseFrequency="0.0035 0.95" numOctaves="2" seed="4"/>
+      <feColorMatrix type="matrix" values="1 0 0 0 0  1 0 0 0 0  1 0 0 0 0  0 0 0 0 1"/>
+    </filter>
+    <rect x="-120" y="-160" width="1200" height="660" transform="rotate(-2 480 170)" filter="url(#f-brush)"/>
+  </svg>
+
+  <div class="layer sheen"></div>
+
+  <div class="ink">
+<pre class="mark">██▄    ██     ▄███▄     ██     ██   ██
+███▄   ██    ██▀ ▀██     ██   ██    ██
+██ ▀█▄ ██    ███████      ██ ██     ██
+██   ▀███    ██   ██       ███      ██
+██     ██    ██   ██        █       ██</pre>
+    <div class="maker">Owari Labs™</div>
+    <div class="title"><span>NAVI - Agent NAVIgator</span></div>
+    <div class="rule"></div>
+    <div class="series">Council Series</div>
+    <div class="year">1998</div>
+  </div>
+
+  <svg class="layer grain" viewBox="0 0 960 340" preserveAspectRatio="none" aria-hidden="true">
+    <filter id="f-grain" x="0" y="0" width="100%" height="100%" color-interpolation-filters="sRGB">
+      <feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" seed="9"/>
+      <feColorMatrix type="matrix" values="1 0 0 0 0  1 0 0 0 0  1 0 0 0 0  0 0 0 0 1"/>
+    </filter>
+    <rect width="960" height="340" filter="url(#f-grain)"/>
+  </svg>
+
+  <svg class="layer scratches" viewBox="0 0 960 340" preserveAspectRatio="none" aria-hidden="true">
+    <g id="scratches" fill="none" stroke-linecap="round"></g>
+  </svg>
+
+  <div class="layer vignette"></div>
+</div>
+
+<!-- the ink: slightly rough edges, uneven density, a little softness -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <filter id="ink" x="-3%" y="-6%" width="106%" height="112%" color-interpolation-filters="sRGB">
+    <feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" seed="3" result="rough"/>
+    <feDisplacementMap in="SourceGraphic" in2="rough" scale="0.8" xChannelSelector="R" yChannelSelector="B" result="edge"/>
+    <feTurbulence type="fractalNoise" baseFrequency="0.04" numOctaves="3" seed="11" result="dens"/>
+    <feColorMatrix in="dens" type="matrix" values="0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  .6 0 0 0 .7" result="densA"/>
+    <feComposite in="edge" in2="densA" operator="in" result="dense"/>
+    <feGaussianBlur in="dense" stdDeviation="0.3"/>
+  </filter>
+</svg>
+
+<script>
+  // Underline: the first two thirds of the title, from the left edge of the type.
+  (function () {
+    const t = document.querySelector('.title span'), r = document.querySelector('.rule');
+    const fit = () => { r.style.width = Math.round(t.getBoundingClientRect().width * 0.66) + 'px'; };
+    fit();
+    if (document.fonts) document.fonts.ready.then(fit);
+  })();
+
+  // Scratches: seeded, so every render is identical.
+  (function () {
+    let s = 0x1998;
+    const rnd = () => { s |= 0; s = s + 0x6D2B79F5 | 0; let t = Math.imul(s ^ s >>> 15, 1 | s); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; };
+    const gauss = () => (rnd() + rnd() + rnd() - 1.5) / 1.5;
+    const angle = () => { const p = rnd(); return p < .62 ? 26 + gauss() * 9 : p < .86 ? -36 + gauss() * 11 : rnd() * 180; };
+    const W = 960, H = 340, NS = 'http://www.w3.org/2000/svg', g = document.getElementById('scratches');
+    const defs = g.parentNode.insertBefore(document.createElementNS(NS, 'defs'), g);
+    const el = (name, attrs) => { const e = document.createElementNS(NS, name); for (const k in attrs) e.setAttribute(k, attrs[k]); return e; };
+    let gid = 0;
+    const line = (x, y, L, deg, w, color, op) => {
+      const th = deg * Math.PI / 180, dx = Math.cos(th) * L, dy = -Math.sin(th) * L, bend = gauss() * L * .035;
+      const mx = x + dx / 2 + Math.sin(th) * bend, my = y + dy / 2 + Math.cos(th) * bend, x2 = x + dx, y2 = y + dy;
+      const p = el('path', { d: `M${x.toFixed(1)} ${y.toFixed(1)}Q${mx.toFixed(1)} ${my.toFixed(1)} ${x2.toFixed(1)} ${y2.toFixed(1)}`,
+                             stroke: color, 'stroke-width': w.toFixed(2), 'stroke-opacity': op.toFixed(3) });
+      if (L > 36) {
+        // a long scratch bites in, fades as the grit wears, lifts off, and skips now and then
+        const id = 'sc' + gid++, a = .06 + rnd() * .22, b = Math.min(.9, a + .15 + rnd() * .4);
+        const lg = el('linearGradient', { id, gradientUnits: 'userSpaceOnUse', x1: x.toFixed(1), y1: y.toFixed(1), x2: x2.toFixed(1), y2: y2.toFixed(1) });
+        for (const [o, k] of [[0, 0], [a, 1], [b, .3 + rnd() * .5], [1, 0]]) lg.appendChild(el('stop', { offset: o.toFixed(3), 'stop-color': color, 'stop-opacity': k.toFixed(2) }));
+        defs.appendChild(lg);
+        const dash = [];
+        for (let acc = 0; acc < L * 1.2;) { const d = 5 + rnd() * L * .3, gap = rnd() < .45 ? 1 + rnd() * 4 : .6; dash.push(d.toFixed(1), gap.toFixed(1)); acc += d + gap; }
+        p.setAttribute('stroke', `url(#${id})`);
+        p.setAttribute('stroke-dasharray', dash.join(' '));
+      }
+      g.appendChild(p);
+    };
+    const field = (n, lmin, lmax, wmin, wmax, color, omin, omax) => {
+      for (let i = 0; i < n; i++) {
+        line(rnd() * (W + 120) - 60, rnd() * (H + 80) - 40, lmin + (lmax - lmin) * rnd() ** 2.2, angle(),
+             wmin + (wmax - wmin) * rnd(), color, omin + (omax - omin) * rnd() ** 1.6);
+      }
+    };
+    field(60, 40, 340, .35, .75, '#f4f4f0', .18, .62);   // long hairlines catching the light
+    field(26, 30, 220, .30, .60, '#4f4f4c', .05, .16);   // long hairlines holding grime
+    field(150, 14, 60, .30, .55, '#f3f3ef', .06, .26);   // medium
+    field(560, 2, 15, .30, .60, '#f2f2ee', .06, .24);    // fine wear
+    field(220, 2, 10, .30, .50, '#4f4f4c', .03, .11);
+    for (let c = 0; c < 8; c++) {                        // scuffs: short parallel strokes, kept off the type
+      let cx, cy;
+      do { cx = rnd() * W; cy = rnd() * H; } while (cx < 700 && cy > 30 && cy < 310);
+      const deg = angle(), n = 8 + (rnd() * 18 | 0);
+      const th = deg * Math.PI / 180, nx = Math.sin(th), ny = Math.cos(th);
+      for (let i = 0; i < n; i++) {
+        const off = gauss() * 10, along = gauss() * 12;
+        line(cx + nx * off + Math.cos(th) * along, cy + ny * off - Math.sin(th) * along,
+             4 + rnd() * 20, deg + gauss() * 2.5, .3 + rnd() * .3, '#f4f4f0', .08 + rnd() * .2);
+      }
+    }
+  })();
+</script>
+</body>
+</html>

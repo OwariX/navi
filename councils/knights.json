@@ -1,0 +1,25 @@
+{
+  "name": "knights",
+  "title": "The Knights",
+  "description": "The default council: design it, red-team it, cost it, record it.",
+  "lead": "architect",
+  "reviewers": [
+    "adversary",
+    "ledger"
+  ],
+  "recorder": "scribe",
+  "guard": "warden",
+  "models": {
+    "adversary": "balanced",
+    "ledger": "balanced",
+    "scribe": "fast",
+    "warden": "fast"
+  },
+  "sensitivity": "internal",
+  "instructions": "Follow the pace in `navi brief`: QUICK is one agent and one pass (plan, build, check); STANDARD builds first, then the reviewers check the built result in one parallel batch; THOROUGH runs at most two rounds. Checks beat debate: every plan ends with \"Done when: <checks>\". Build only if the task asks for it. Record decisions as an ADR when the pace calls for one.",
+  "outputs": [
+    "the built files (registered as artifacts)",
+    "an ADR for STANDARD and THOROUGH sessions",
+    "a threat model when security was discussed"
+  ]
+}

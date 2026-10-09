@@ -1,0 +1,148 @@
+#!/bin/sh
+# fake Claude Code for e2e tests: logs how it was launched, then acts like a tiny moderator.
+#   FAKE_LOG   where to append the argv + what it did
+#   FAKE_SLEEP seconds to "work" (default 5)
+#   FAKE_END=1 close the session at the end (so a headless supervisor sees it finished)
+#   FAKE_LISTEN=1 then `navi listen` like the real moderator (NAVI_AFTER_END_WAIT keeps that short)
+#   FAKE_PERMIT=1 run three commands nothing allowed: like the real CLI in -p, each goes to the PermissionRequest hook
+#                 from --settings (NAVI's `permit`), which waits for the user's answer in NAVI
+# With --output-format stream-json it prints the same kind of lines the real CLI does (init, tool calls, result + cost).
+LOG="${FAKE_LOG:-/dev/null}"
+STREAM=0
+for a in "$@"; do [ "$a" = "stream-json" ] && STREAM=1; done
+{ echo "argv:"; for a in "$@"; do echo "  [$a]"; done; echo "hid=$NAVI_HOST_ID dir=$NAVI_DIR bash_timeout=$BASH_DEFAULT_TIMEOUT_MS"
+  echo "env: engine=$NAVI_ENGINE base=$ANTHROPIC_BASE_URL token=$ANTHROPIC_AUTH_TOKEN key=${ANTHROPIC_API_KEY-unset} strong=$ANTHROPIC_DEFAULT_OPUS_MODEL balanced=$ANTHROPIC_DEFAULT_SONNET_MODEL fast=$ANTHROPIC_DEFAULT_HAIKU_MODEL fable=$ANTHROPIC_DEFAULT_FABLE_MODEL ctx=$CLAUDE_CODE_MAX_CONTEXT_TOKENS offline=$CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"; } >> "$LOG"
+say() { if [ "$STREAM" = 1 ]; then echo "$1"; fi; }
+tool() { say "{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"tool_use\",\"name\":\"Bash\",\"input\":{\"command\":\"$1\"}}]}}"; }
+say '{"type":"system","subtype":"init","model":"claude-fake","tools":["Bash","Read","Edit"]}'
+# The council generator's headless prompts (forge.py, `claude -p` with the prompt as the last argument): canned answers
+# after a short pause (FAKE_GEN_SLEEP), and never the moderator act below. Some names are wrong on purpose: the server must fix them.
+case "$*" in
+  *"Reply with exactly these two words and nothing else: NAVI ONLINE"*)     # `navi engine test` / Settings > Test it
+    echo "NAVI ONLINE"; exit 0;;
+  *"<task>navi-design-council</task>"*)
+    sleep "${FAKE_GEN_SLEEP:-2}"
+    SIZE=$(printf '%s\n' "$*" | sed -n 's/^Size: \([a-z]*\).*/\1/p' | head -1)
+    cat <<EOF
+{"name": "azure-pr-review", "title": "Azure Terraform reviews", "description": "Reviews Terraform pull requests for Azure, strict on RBAC and networking.",
+ "lead": "architect", "reviewers": ["tf-reviewer", "adversary", "ghost-agent"], "recorder": "pr-scribe", "guard": "warden", "extra": [],
+ "models": {"architect": "opus", "tf-reviewer": "sonnet", "adversary": "opus", "pr-scribe": "haiku", "warden": "gpt-9"},
+ "sensitivity": "internal",
+ "instructions": "Review only what the pull request changes. Never run terraform apply. Cost is out of scope.",
+ "outputs": ["Review summary", "PR description from the repo template"],
+ "new_agents": [
+  {"name": "tf-reviewer", "role": "terraform reviewer", "color": "#4fd1c5", "description": "Reviews Terraform plans for Azure.",
+   "brief": "Checks every plan for RBAC drift, public endpoints and missing tags. Flags anything that widens access."},
+  {"name": "pr-scribe", "role": "PR writer", "color": "#4fd1c5", "description": "Writes the pull request description.",
+   "brief": "Writes the PR description from the repo template: what changed, why, and how it was checked."},
+  {"name": "architect", "role": "a second architect", "color": "#ffffff", "description": "Dropped: a built-in name.", "brief": "x"},
+  {"name": "Bad Name!", "role": "x", "color": "#123456", "description": "Dropped: not a valid name.", "brief": "x"}],
+ "briefs": {"architect": "Proposes the module layout and makes the change.",
+            "adversary": "Red-teams the change: what an attacker or a bad deploy could do with it.",
+            "warden": "Keeps secrets and state files out of the agents' context."},
+ "why": "Fake design for the tests (size: ${SIZE:-none})."}
+EOF
+    exit 0;;
+  *"<task>navi-draft-agent</task>"*)
+    sleep 1
+    CUR=$(printf '%s\n' "$*" | sed -n 's/^<current_agent name="\([a-z0-9_-]*\)".*/\1/p' | head -1)
+    case "$*" in
+      *dup-name-test*) echo '{"name": "architect", "role": "second architect", "description": "A duplicate.", "brief": "A built-in name the server must refuse."}';;
+      *) if [ -n "$CUR" ]; then
+           echo "{\"name\": \"$CUR\", \"role\": \"cost reviewer\", \"description\": \"Checks what a change costs.\", \"brief\": \"Rewritten by NAVI: checks the monthly cost of every change before it ships.\"}"
+         else
+           echo '{"name": "cost-watch", "role": "cost watcher", "description": "Watches what changes cost.", "brief": "Estimates the monthly cost of every change and flags anything over budget.", "seat": "reviewer"}'
+         fi;;
+    esac
+    exit 0;;
+  *"<task>navi-read-sources</task>"*)     # "describe it in your own words": FAKE_FAIL in the words = the model is down
+    sleep 1
+    case "$*" in *FAKE_FAIL*) echo "fake: the model is down" >&2; exit 1;; esac
+    cat <<'EOF'
+{"sources": [{"kind": "folder", "value": "docs", "note": "the project docs"},
+             {"kind": "web", "value": "learn.microsoft.com/azure", "note": "Azure docs"},
+             {"kind": "mcp", "value": "Team-Wiki", "note": "the team wiki"},
+             {"kind": "folder", "value": "", "note": "my vault"},
+             {"kind": "printer", "value": "nope"}],
+ "question": "Which folder is the vault in?"}
+EOF
+    exit 0;;
+  *"<task>navi-edit-persona</task>"*)     # "Make the change": the same file, one line added where the change says
+    sleep 1
+    printf '%s' "$*" | python3 -c 'import re, sys
+t = sys.stdin.read()
+m = re.search(r"<persona>\n(.*?)\n</persona>", t, re.S)
+ch = re.search(r"<change>\n(.*?)\n</change>", t, re.S)
+lines = (m.group(1) if m else "---\n---\n").split("\n")
+at = max(i for i, l in enumerate(lines) if l.startswith("- ")) if any(l.startswith("- ") for l in lines) else len(lines)
+lines.insert(at, "- " + (ch.group(1).strip() if ch else "a change") + " (added by the fake edit).")
+print("\n".join(lines))'
+    exit 0;;
+  *"You write council-member personas for NAVI"*)
+    sleep "${FAKE_GEN_SLEEP:-2}"
+    N=$(printf '%s\n' "$*" | sed -n 's/^Write the complete persona file for "\([a-z0-9_-]*\)".*/\1/p' | head -1)
+    sed "s/NAME_HERE/${N:-agent}/g; s/UPPER_HERE/$(printf '%s' "${N:-agent}" | tr 'a-z' 'A-Z')/g" <<'EOF'
+---
+name: NAME_HERE
+description: "Written by the fake claude for the tests."
+role: "tester"
+color: "#9ae6b4"
+model: ""
+---
+You are **UPPER_HERE**, the council's tester.
+
+You check one thing well and leave design and building to the lead.
+
+- Read your inbox before acting, and review every `proposal` and `revision` sent to you.
+- Back every claim with the real code or config: gate every read with `navi gate` first.
+- Each `challenge` names the concrete failure, how it happens, and the fix.
+- Set `navi status NAME_HERE "..."` before slow work.
+- Use `navi ask` only when the human's choice changes the outcome.
+- End every round with a `verdict` to `all`: approve, approve with conditions, or needs work.
+- Never approve what you haven't checked.
+EOF
+    exit 0;;
+esac
+case "$1" in *"listen --timeout 0"*)     # woken by NAVI for a message after the end: read it, done
+  tool "navi listen --timeout 0"; navi listen --timeout 0 >> "$LOG" 2>&1; echo "followup handled" >> "$LOG"
+  navi chat "fake reply: done, the title is bigger now (index.html)" >> "$LOG" 2>&1     # chat mode: one agent answers directly
+  say '{"type":"result","subtype":"success","total_cost_usd":0.0123,"duration_ms":4000,"num_turns":2,"result":"handled"}'
+  exit 0;; esac
+tool "navi brief"
+navi brief >> "$LOG" 2>&1
+LEAD=$(navi council 2>/dev/null | sed -n 's/.*lead[: ]*\([a-z0-9_-]*\).*/\1/p' | head -1)
+LEAD=${LEAD:-architect}
+echo "lead=$LEAD" >> "$LOG"
+say '{"type":"assistant","message":{"id":"msg_fake_1","model":"claude-opus-5","usage":{"input_tokens":12,"output_tokens":340,"cache_read_input_tokens":21000,"cache_creation_input_tokens":4000},"content":[{"type":"text","text":"Council seated. ARCHITECT drafts the proposal."}]}}'
+tool "navi status navi \\\"council seated\\\" --state working"
+navi status navi "council seated · $LEAD drafts the proposal" --state working >> "$LOG" 2>&1
+navi status "$LEAD" "reading the task" --state working >> "$LOG" 2>&1
+tool "navi send --from $LEAD --to all --kind proposal --subject e2e"
+navi send --from "$LEAD" --to all --kind proposal --subject "e2e proposal" --body "fake moderator says hi" >> "$LOG" 2>&1
+sleep 2
+if [ "$FAKE_PERMIT" = "1" ]; then
+  HOOK=$(python3 -c 'import json, sys
+a = sys.argv[1:]; s = json.loads(a[a.index("--settings") + 1]) if "--settings" in a else {}
+print(((s.get("hooks") or {}).get("PermissionRequest") or [{}])[0].get("hooks", [{}])[0].get("command", ""))' "$@")
+  for CMD in "npm install left-pad" "curl -s https://example.com" "wget https://example.com/x"; do
+    tool "$CMD"
+    PRE=$(printf '%s' "$CMD" | cut -d' ' -f1-2)
+    DEC=$(printf '{"hook_event_name":"PermissionRequest","tool_name":"Bash","tool_input":{"command":"%s","description":"fake: this needs your OK"},"permission_suggestions":[{"type":"addRules","rules":[{"toolName":"Bash","ruleContent":"%s:*"}],"behavior":"allow","destination":"localSettings"}]}' "$CMD" "$PRE" |
+          sh -c "$HOOK" | python3 -c 'import json, sys
+d = json.load(sys.stdin)["hookSpecificOutput"]["decision"]
+print(d["behavior"] + (" +session-rule" if d.get("updatedPermissions") else ""))')
+    echo "permit $CMD: $DEC" >> "$LOG"
+    navi send --from "$LEAD" --to all --kind note --subject "permission" --body "$CMD: $DEC" >> "$LOG" 2>&1
+  done
+fi
+tool "navi inbox adversary"
+sleep "${FAKE_SLEEP:-5}"
+navi status "$LEAD" "finished" --state done >> "$LOG" 2>&1
+if [ "$FAKE_END" = "1" ]; then tool "navi end --summary done"; navi end --summary "fake session done" >> "$LOG" 2>&1; fi
+if [ "$FAKE_LISTEN" = "1" ]; then tool "navi listen"; navi listen >> "$LOG" 2>&1; fi     # the listen loop after the end
+echo "exit" >> "$LOG"
+if [ "$STREAM" = 1 ]; then
+  echo '{"type":"result","subtype":"success","total_cost_usd":0.4213,"duration_ms":361000,"num_turns":31,"result":"fake claude: final answer","session_id":"fake-conv-1","modelUsage":{"claude-opus-5":{"inputTokens":1200,"outputTokens":3400,"cacheReadInputTokens":45000,"cacheCreationInputTokens":5000,"thinkingTokens":800,"costUSD":0.3,"canonicalModel":"claude-opus-5"},"claude-sonnet-5-5":{"inputTokens":300,"outputTokens":900,"cacheReadInputTokens":12000,"cacheCreationInputTokens":2000,"costUSD":0.1213,"canonicalModel":"claude-sonnet-5-5"}}}'
+else
+  echo "fake claude: final answer"
+fi

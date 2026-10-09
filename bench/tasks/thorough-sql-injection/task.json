@@ -1,0 +1,1 @@
+{"pace": "thorough", "task": "users.py builds SQL from user input. Make find_user safe against SQL injection without changing what it returns for ordinary names, and add a test in test_users.py that proves it."}

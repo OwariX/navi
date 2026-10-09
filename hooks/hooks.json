@@ -1,0 +1,11 @@
+{
+  "description": "NAVI's hard guard: in a project with a NAVI policy (.navi/policy.json), every read, edit, shell command, search and fetch is checked before it runs. Everywhere else it does nothing.",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Read|Write|Edit|MultiEdit|NotebookEdit|Grep|Bash|WebFetch",
+        "hooks": [{ "type": "command", "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/guard.sh\"", "timeout": 60 }]
+      }
+    ]
+  }
+}

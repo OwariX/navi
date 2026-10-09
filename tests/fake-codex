@@ -1,0 +1,111 @@
+#!/usr/bin/env python3
+"""Fake OpenAI Codex CLI for the tests. It logs how it was run and prints `codex exec --json` events in Codex's real
+shape: thread.started, items, turn.completed. It also acts like a tiny moderator, or like a council member when NAVI
+runs one with `navi run`. It runs real `navi` commands and never calls a model.
+   FAKE_LOG     where to append the argv (and what NAVI set in the environment) + what it did
+   FAKE_END=1   the moderator closes the session at the end
+   FAKE_MEMBER  which member the moderator runs with `navi run` before it ends (default: the lead; "none": nobody)
+   FAKE_BG=1    ...in the background, then `navi runs --wait` (or a task that says "[bg]")
+   FAKE_SLEEP   seconds to "work" (default 1)
+Like the real one, it runs its commands in a sandbox unless told otherwise: they see CODEX_SANDBOX and
+CODEX_SANDBOX_NETWORK_DISABLED=1, and a Codex started from inside one can't reach its model (it fails, as the real one
+does: no network there)."""
+import json
+import os
+import re
+import subprocess
+import sys
+import time
+import uuid
+
+args = sys.argv[1:]
+log = open(os.environ.get("FAKE_LOG") or os.devnull, "a")
+
+
+def note(s):
+    log.write(s + "\n")
+    log.flush()
+
+
+note("codex argv:\n" + "\n".join(f"  [{a}]" for a in args))
+note(f"codex env: engine={os.environ.get('NAVI_ENGINE', '')} agent={os.environ.get('NAVI_AGENT', '')} hid={os.environ.get('NAVI_HOST_ID', '')}")
+if args[:1] == ["--version"]:
+    print("codex-cli 0.0.0-fake")
+    sys.exit(0)
+if not args or args[0] != "exec":
+    print("fake codex: its terminal UI isn't faked")
+    sys.exit(0)
+a = args[1:]
+prompt = a[-1] if a else ""
+if os.environ.get("CODEX_SANDBOX_NETWORK_DISABLED") == "1":       # started inside another Codex's sandbox
+    print("Error: OSS setup failed: No running Ollama server detected." if "--oss" in a else
+          "Error: stream disconnected before completion: error sending request for url (https://api.openai.com/v1/responses)", file=sys.stderr)
+    note("no network: started inside a sandbox")
+    sys.exit(1)
+mode = next((x.split("=", 1)[1].strip('"') for i, x in enumerate(a) if i and a[i - 1] == "-c" and x.startswith("sandbox_mode=")), "read-only")
+sandboxed = mode != "danger-full-access" and "--dangerously-bypass-approvals-and-sandbox" not in a
+SANDBOX_ENV = {"CODEX_SANDBOX": "seatbelt", "CODEX_SANDBOX_NETWORK_DISABLED": "1"} if sandboxed else {}
+if "-o" in a:          # navi asks one question: the last message goes to the file after -o
+    open(a[a.index("-o") + 1], "w").write("NAVI ONLINE" if "NAVI ONLINE" in prompt else "OK")
+    sys.exit(0)
+# like the real one: it names its threads, and resumes only a thread it made
+known = os.path.join(os.environ.get("CODEX_HOME") or "/tmp", "fake_threads")
+made = open(known).read().split() if os.path.exists(known) else []
+if "resume" in a:
+    thread = a[a.index("resume") + 1]
+    if thread not in made:
+        print(f"Error: no rollout found for thread id {thread}", file=sys.stderr)
+        note(f"refused resume of unknown thread {thread}")
+        sys.exit(1)
+else:
+    thread = str(uuid.uuid4())
+    open(known, "a").write(thread + "\n")
+
+
+def ev(o):
+    print(json.dumps(o), flush=True)
+
+
+def run(cmd):
+    """A real navi command, reported the way Codex reports a shell command."""
+    iid = f"item_{uuid.uuid4().hex[:6]}"
+    ev({"type": "item.started", "item": {"id": iid, "type": "command_execution", "command": cmd, "aggregated_output": "", "exit_code": None, "status": "in_progress"}})
+    r = subprocess.run(cmd, shell=True, capture_output=True, text=True, env={**os.environ, **SANDBOX_ENV})
+    note(f"$ {cmd}\n{r.stdout}{r.stderr}".rstrip())
+    ev({"type": "item.completed", "item": {"id": iid, "type": "command_execution", "command": cmd, "aggregated_output": r.stdout[-500:],
+                                           "exit_code": r.returncode, "status": "completed" if r.returncode == 0 else "failed"}})
+    return r
+
+
+ev({"type": "thread.started", "thread_id": thread})
+ev({"type": "item.completed", "item": {"id": "item_0", "type": "error", "message": "`--dangerously-bypass-hook-trust` is enabled. Enabled hooks may run without review for this invocation."}})
+ev({"type": "turn.started"})
+if "## Your assignment" in prompt:          # NAVI runs one member: `navi run <agent>`
+    me = os.environ.get("NAVI_AGENT") or "member"
+    run(f'navi status {me} "checking it" --state working')
+    time.sleep(float(os.environ.get("FAKE_MEMBER_SLEEP") or 0))      # a slow member: something to stop
+    run(f'navi send --from {me} --to all --kind verdict --subject "approve" --body "fake codex member {me}: checked, no blockers"')
+    run(f'navi status {me} "done" --state done')
+    ev({"type": "item.completed", "item": {"id": "item_m", "type": "agent_message", "text": f"approve, no blockers ({me}, fake codex member)"}})
+elif "listen --timeout 0" in prompt:        # woken after the end: read the message, answer in the chat
+    run("navi listen --timeout 0")
+    run('navi chat "fake codex reply: done"')
+    note("followup handled")
+else:                                        # the moderator
+    bg = os.environ.get("FAKE_BG") == "1" or "[bg]" in run("navi brief").stdout
+    lead = (re.search(r"lead[: ]*([a-z0-9_-]+)", run("navi council").stdout) or [None, "architect"])[1]
+    run('navi status navi "council seated on codex" --state working')
+    member = os.environ.get("FAKE_MEMBER") or lead
+    if member != "none":
+        if bg:
+            run(f'navi run {member} "check the page" --bg')
+            note("runs --wait exit %d" % run("navi runs --wait --timeout 60").returncode)
+        else:
+            note("run exit %d" % run(f'navi run {member} "check the page"').returncode)
+    time.sleep(float(os.environ.get("FAKE_SLEEP") or 1))
+    if os.environ.get("FAKE_END") == "1":
+        run('navi end --summary "fake codex session done"')
+    ev({"type": "item.completed", "item": {"id": "item_z", "type": "agent_message", "text": "fake codex moderator: done"}})
+ev({"type": "turn.completed", "usage": {"input_tokens": 24000, "cached_input_tokens": 20000, "cache_write_input_tokens": 0,
+                                         "output_tokens": 900, "reasoning_output_tokens": 120}})
+note("codex exit")

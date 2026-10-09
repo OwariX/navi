@@ -1,0 +1,452 @@
+{
+ "about": "The demo council (The Knights build \"hello, world\"), played by the browser (/demo) and by `navi tui --demo`. {{line}} is the line the user writes when the architect asks.",
+ "default_line": "everything is connected.",
+ "files": {
+  "out/ADR-001-hello-world.md": "# ADR-001: hello, world\n\n## Context\nA hello-world page, as a NAVI demo. Must work offline, must look like it belongs to NAVI.\n\n## Decision\nOne HTML file, no dependencies, no network calls. The NAVI block logo decodes out of static, then the greeting,\nthen the line the user wrote: “{{line}}”. System monospace font only. Hard size budget: 12 KB.\n\n## Consequences\n- Nothing to install, nothing to fetch, nothing to leak (ADVERSARY C1).\n- The 12 KB cap keeps it honest (LEDGER C2). Measured: 6.7 KB.\n- No web fonts means the exact glyph shapes vary by machine. Accepted.\n\n## Rejected\n- A web font for the greeting: phones home. Rejected.\n- A framework: for one page. Rejected without discussion.\n\n## Accepted risks\n- The glitch effect uses CSS animations: on a very old browser it degrades to plain text.\n"
+ },
+ "events": [
+  [
+   600,
+   {
+    "type": "boot",
+    "body": "Build a hello-world page for NAVI: one HTML file, no dependencies, and it has to look like it belongs here"
+   }
+  ],
+  [
+   700,
+   {
+    "type": "policy",
+    "sensitivity": "internal",
+    "scope": [
+     "."
+    ],
+    "outbound": "redact",
+    "body": "internal · scope . · 28 deny / 19 ask patterns · outbound redact"
+   }
+  ],
+  [
+   600,
+   {
+    "type": "council",
+    "name": "knights",
+    "title": "The Knights",
+    "body": "lead architect · reviewers adversary, ledger · recorder scribe · guard warden"
+   }
+  ],
+  [
+   500,
+   {
+    "type": "join",
+    "agent": "architect",
+    "role": "systems design"
+   }
+  ],
+  [
+   450,
+   {
+    "type": "join",
+    "agent": "adversary",
+    "role": "red team / threat model"
+   }
+  ],
+  [
+   450,
+   {
+    "type": "join",
+    "agent": "ledger",
+    "role": "cost & budget"
+   }
+  ],
+  [
+   450,
+   {
+    "type": "join",
+    "agent": "scribe",
+    "role": "ADRs & docs"
+   }
+  ],
+  [
+   450,
+   {
+    "type": "join",
+    "agent": "warden",
+    "role": "data guard"
+   }
+  ],
+  [
+   700,
+   {
+    "type": "host",
+    "host": "claude",
+    "model": "opus",
+    "effort": "medium",
+    "mode": "headless",
+    "body": "moderator: opus · effort medium · running in the background"
+   }
+  ],
+  [
+   500,
+   {
+    "type": "pace",
+    "pace": "standard",
+    "body": "pace: standard · build, then the reviewers check the result"
+   }
+  ],
+  [
+   1400,
+   {
+    "type": "status",
+    "agent": "navi",
+    "state": "working",
+    "body": "council seated (The Knights) · ARCHITECT drafts the proposal"
+   }
+  ],
+  [
+   1200,
+   {
+    "type": "status",
+    "agent": "architect",
+    "state": "working",
+    "body": "reading the task"
+   }
+  ],
+  [
+   1800,
+   {
+    "type": "think",
+    "agent": "architect",
+    "body": "one file, zero dependencies. the NAVI logo decoding out of static, then the greeting. power lines, scanlines, a red accent."
+   }
+  ],
+  [
+   2600,
+   {
+    "type": "gate",
+    "agent": "architect",
+    "action": "read",
+    "target": "web/index.html",
+    "decision": "allow",
+    "body": "in scope"
+   }
+  ],
+  [
+   1600,
+   {
+    "type": "think",
+    "agent": "architect",
+    "body": "the interface already has the logo and the power lines. reuse the shapes, not the code."
+   }
+  ],
+  [
+   2200,
+   {
+    "type": "message",
+    "agent": "architect",
+    "to": "all",
+    "kind": "proposal",
+    "subject": "PROPOSAL-1: a single index.html, nothing else",
+    "body": "- One file: HTML + CSS + a little JS. No build step, no framework, no CDN.\n- The NAVI block logo decodes out of static (like the boot screen), then \"hello, world\" with the RGB-split glitch.\n- Six sagging power lines on a canvas, scanlines on top, the hub rings idling under the greeting.\n- A closing line under the greeting, typed out character by character.\n- Fonts: whatever monospace the machine has. Colours: the wired palette.\n- Why: a hello world should be readable in full in one sitting, by a human."
+   }
+  ],
+  [
+   900,
+   {
+    "type": "status",
+    "agent": "architect",
+    "state": "done",
+    "body": "proposal sent · waiting for the reviewers"
+   }
+  ],
+  [
+   1200,
+   {
+    "type": "status",
+    "agent": "adversary",
+    "state": "working",
+    "body": "attacking PROPOSAL-1"
+   }
+  ],
+  [
+   300,
+   {
+    "type": "status",
+    "agent": "ledger",
+    "state": "working",
+    "body": "costing PROPOSAL-1"
+   }
+  ],
+  [
+   2300,
+   {
+    "type": "think",
+    "agent": "adversary",
+    "body": "no network calls at all? then there is nothing to leak. unless a font sneaks in."
+   }
+  ],
+  [
+   2200,
+   {
+    "type": "message",
+    "agent": "adversary",
+    "to": "architect",
+    "kind": "challenge",
+    "subject": "C1: \"whatever font\" can become a web font",
+    "body": "The proposal says no CDN, then says \"fonts: whatever\". A @font-face to Google Fonts would phone home on every visit and leak the visitor's IP. Fix: system monospace only, stated as a hard rule in the file. Confirm no external URL of any kind."
+   }
+  ],
+  [
+   1800,
+   {
+    "type": "think",
+    "agent": "ledger",
+    "body": "a hello world has no excuse to be heavy. put a number on it."
+   }
+  ],
+  [
+   2000,
+   {
+    "type": "message",
+    "agent": "ledger",
+    "to": "architect",
+    "kind": "challenge",
+    "subject": "C2: no size budget",
+    "body": "Canvas + glitch + typing + logo is fine, but \"a little JS\" is not a number. Cap the whole file at 12 KB and measure it before you call it done. Over budget means something is doing work the page does not need."
+   }
+  ],
+  [
+   900,
+   {
+    "type": "status",
+    "agent": "adversary",
+    "state": "done",
+    "body": "1 challenge sent"
+   }
+  ],
+  [
+   300,
+   {
+    "type": "status",
+    "agent": "ledger",
+    "state": "done",
+    "body": "1 challenge sent"
+   }
+  ],
+  [
+   1400,
+   {
+    "type": "status",
+    "agent": "architect",
+    "state": "working",
+    "body": "answering C1, C2"
+   }
+  ],
+  [
+   2400,
+   {
+    "type": "message",
+    "agent": "architect",
+    "to": "all",
+    "kind": "revision",
+    "subject": "REVISION-1: C1 and C2 accepted",
+    "body": "- C1 accepted: system monospace only (SF Mono / Menlo / Consolas), and no URL anywhere in the file. ADVERSARY may grep for \"http\" before the verdict.\n- C2 accepted: hard cap 12 KB, measured with ls -l before I report it built.\n- Everything else unchanged."
+   }
+  ],
+  [
+   1800,
+   {
+    "type": "ask",
+    "agent": "architect",
+    "body": "One thing the council can't decide for you: what should the page say? Write the line that types out under “hello, world”.",
+    "placeholder": "The council has spoken."
+   }
+  ],
+  [
+   1600,
+   {
+    "type": "think",
+    "agent": "architect",
+    "body": "the line under the greeting: “{{line}}”. the rest stays exactly as designed."
+   }
+  ],
+  [
+   1800,
+   {
+    "type": "message",
+    "agent": "adversary",
+    "to": "all",
+    "kind": "verdict",
+    "subject": "approve",
+    "body": "No external URL, no fonts, no fetch. Nothing to attack in a page that never talks to anyone. Approve."
+   }
+  ],
+  [
+   1500,
+   {
+    "type": "message",
+    "agent": "ledger",
+    "to": "all",
+    "kind": "verdict",
+    "subject": "approve with conditions",
+    "body": "Approve, on the condition that the 12 KB figure is measured, not estimated."
+   }
+  ],
+  [
+   1500,
+   {
+    "type": "status",
+    "agent": "architect",
+    "state": "working",
+    "body": "writing index.html"
+   }
+  ],
+  [
+   2600,
+   {
+    "type": "gate",
+    "agent": "architect",
+    "action": "write",
+    "target": "out/index.html",
+    "decision": "allow",
+    "body": "in scope"
+   }
+  ],
+  [
+   2600,
+   {
+    "type": "think",
+    "agent": "architect",
+    "body": "logo, wire, greeting, “{{line}}”, rings. done."
+   }
+  ],
+  [
+   1800,
+   {
+    "type": "gate",
+    "agent": "architect",
+    "action": "exec",
+    "target": "ls -l out/index.html",
+    "decision": "allow",
+    "body": "read-only command"
+   }
+  ],
+  [
+   1600,
+   {
+    "type": "think",
+    "agent": "architect",
+    "body": "6713 bytes. 6.7 KB, under the 12 KB cap with room to spare."
+   }
+  ],
+  [
+   1400,
+   {
+    "type": "artifact",
+    "agent": "architect",
+    "path": "out/index.html",
+    "title": "index.html · hello, world (6.7 KB)"
+   }
+  ],
+  [
+   1200,
+   {
+    "type": "status",
+    "agent": "architect",
+    "state": "done",
+    "body": "built · 6.7 KB"
+   }
+  ],
+  [
+   1200,
+   {
+    "type": "message",
+    "agent": "architect",
+    "to": "scribe",
+    "kind": "note",
+    "subject": "Consensus reached - write it up",
+    "body": "Both verdicts are in. ADR with C1/C2 as decisions, the measured size, and the rejected alternatives."
+   }
+  ],
+  [
+   1200,
+   {
+    "type": "status",
+    "agent": "scribe",
+    "state": "working",
+    "body": "writing ADR-001"
+   }
+  ],
+  [
+   2800,
+   {
+    "type": "gate",
+    "agent": "scribe",
+    "action": "write",
+    "target": "out/ADR-001-hello-world.md",
+    "decision": "allow",
+    "body": "in scope"
+   }
+  ],
+  [
+   2200,
+   {
+    "type": "artifact",
+    "agent": "scribe",
+    "path": "out/ADR-001-hello-world.md",
+    "title": "ADR-001 · hello, world"
+   }
+  ],
+  [
+   900,
+   {
+    "type": "status",
+    "agent": "scribe",
+    "state": "done",
+    "body": "1 artifact"
+   }
+  ],
+  [
+   1000,
+   {
+    "type": "status",
+    "agent": "warden",
+    "state": "working",
+    "body": "scanning the deliverables"
+   }
+  ],
+  [
+   2000,
+   {
+    "type": "think",
+    "agent": "warden",
+    "body": "two files. no keys, no tokens, no addresses. clean."
+   }
+  ],
+  [
+   1400,
+   {
+    "type": "message",
+    "agent": "warden",
+    "to": "all",
+    "kind": "note",
+    "subject": "scan clean",
+    "body": "index.html and ADR-001 scanned: nothing sensitive. The perimeter held the whole session: 0 denies."
+   }
+  ],
+  [
+   800,
+   {
+    "type": "status",
+    "agent": "warden",
+    "state": "done",
+    "body": "clean"
+   }
+  ],
+  [
+   2200,
+   {
+    "type": "end",
+    "body": "hello, world: a single 6.7 KB HTML file, no dependencies, no network.\nThe NAVI logo decodes out of static, then the greeting, then the line you wrote:\n“{{line}}”\nAccepted risk: glyph shapes vary with the machine's monospace font.\nFiles: out/index.html, out/ADR-001-hello-world.md"
+   }
+  ]
+ ]
+}

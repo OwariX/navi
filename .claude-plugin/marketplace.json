@@ -1,0 +1,13 @@
+{
+  "name": "navi",
+  "owner": { "name": "OwariX", "url": "https://github.com/OwariX" },
+  "metadata": { "description": "NAVI, the Agent NAVIgator: a council of AI agents with you in the loop." },
+  "plugins": [
+    {
+      "name": "navi",
+      "source": "./",
+      "description": "A council of AI agents that plans, challenges and builds your task while you watch, with NAVI's guard bundled.",
+      "category": "development"
+    }
+  ]
+}

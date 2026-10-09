@@ -1,0 +1,57 @@
+name: tests
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  all:
+    name: every suite (Python 3.12, Chrome)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+      - name: Playwright
+        working-directory: tests/e2e
+        run: npm init -y > /dev/null && npm i playwright
+      - name: tests/run.sh
+        run: sh tests/run.sh 2>&1 | tee run.log; exit ${PIPESTATUS[0]}
+        shell: bash
+      - name: Screenshots and logs from a failed run
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: navi-tests
+          path: |
+            run.log
+            /tmp/navi-tests.*/shots
+            /tmp/navi-tests.*/*.log
+          if-no-files-found: ignore
+  oldest-python:
+    name: the Python suites on Python 3.9
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.9"
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+      - name: Playwright
+        working-directory: tests/e2e
+        run: npm init -y > /dev/null && npm i playwright
+      - name: tests/run.sh (no browser suites)
+        run: sh tests/run.sh server tuidemo update install engines enginewizard tui

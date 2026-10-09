@@ -1,0 +1,30 @@
+// usage: node wizard.js <base-url> <out-dir>  — the first connection: one page, one button, then home
+const { chromium } = require('playwright');
+const [base, out] = process.argv.slice(2);
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+const R = []; const check = (n, ok, x = '') => R.push(`${ok ? 'PASS' : 'FAIL'}  ${n}${x ? '  · ' + x : ''}`);
+(async () => {
+  const browser = await chromium.launch({ channel: 'chrome', headless: true });
+  const p = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+  const errs = []; p.on('pageerror', e => errs.push(e.message));
+  await p.goto(base + '?skipboot'); await sleep(1500);
+  check('first visit opens with a welcome', await p.$eval('#welcome', e => e.classList.contains('show')) && /Welcome to NAVI/.test(await p.textContent('#welcome')));
+  await p.screenshot({ path: `${out}/onboarding-welcome.png` });
+  await p.click('#welGo'); await sleep(500);
+  check('Make it yours opens the first connection', await p.$eval('#setup', e => e.classList.contains('show')));
+  check('...titled First connection, no Cancel', (await p.textContent('#setupTitle')) === 'First connection' && !(await p.isVisible('#sCancel')));
+  check('grain and edge darkness start at 0', (await p.inputValue('input[data-k="grain"]')) === '0' && (await p.inputValue('input[data-k="vignette"]')) === '0');
+  check('the moderator defaults to the background', await p.isChecked('input[name="modMode"][value="headless"]'));
+  await p.screenshot({ path: `${out}/wizard.png` });
+  await p.click('#sNext'); await sleep(1500);
+  check("then You're set, with the demo and a first council", await p.$eval('#ready', e => e.classList.contains('show')) && /Watch the demo/.test(await p.textContent('#ready')));
+  await p.screenshot({ path: `${out}/onboarding-ready.png` });
+  await p.click('#rStart'); await sleep(500);
+  check('Start your first council lands home with the task box focused', await p.$eval('#menu', e => e.classList.contains('show')) && await p.evaluate(() => document.activeElement?.id === 'mTask'));
+  await p.evaluate(() => post('/settings', {setup_complete: false})); await p.reload(); await sleep(1500);
+  await p.click('#welSkip'); await sleep(1500);
+  check('Use the defaults skips straight to You\'re set, and the setup is saved', await p.$eval('#ready', e => e.classList.contains('show')) && await p.evaluate(async () => (await (await fetch('/settings')).json()).setup_complete === true));
+  console.log(R.join('\n')); console.log('page errors:', errs.length ? errs : 'none');
+  await browser.close();
+  process.exit(R.some(r => r.startsWith('FAIL')) || errs.length ? 1 : 0);
+})().catch(e => { console.log(R.join('\n')); console.error('WIZARD FAIL', e.message); process.exit(1); });

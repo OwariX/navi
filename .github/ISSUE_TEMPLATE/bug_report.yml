@@ -1,0 +1,47 @@
+name: Something doesn't work
+description: A bug, an error, or something in NAVI that's unclear
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what NAVI did instead. Screenshots help.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: How to make it happen again
+      placeholder: |
+        1. navi
+        2. Start a council on ...
+        3. ...
+  - type: dropdown
+    id: engine
+    attributes:
+      label: Engine
+      options: [Claude, Local (Ollama), Codex, Local (Ollama) via Codex, Gemini, Not sure]
+    validations:
+      required: true
+  - type: dropdown
+    id: where
+    attributes:
+      label: Where
+      options: [In the browser, In the terminal (navi tui), From Claude Code (/navi), From another agent program]
+  - type: input
+    id: version
+    attributes:
+      label: NAVI version
+      description: The output of `navi --version`
+    validations:
+      required: true
+  - type: textarea
+    id: doctor
+    attributes:
+      label: navi doctor
+      description: The output of `navi doctor`, and your operating system
+      render: text
+  - type: markdown
+    attributes:
+      value: "Found a way past the guard? Please don't post it here: see SECURITY.md."

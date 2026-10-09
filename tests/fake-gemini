@@ -1,0 +1,130 @@
+#!/usr/bin/env python3
+"""Fake Gemini CLI for the tests. It logs how it was run and prints `gemini -p -o stream-json` events in Gemini's
+real shape: init, messages in deltas, tool_use and tool_result, result with stats. It acts like a tiny moderator, or
+like a member under `navi run`. It runs real `navi` commands and never calls a model.
+   FAKE_LOG  FAKE_END=1  FAKE_MEMBER  FAKE_SLEEP   as in fake-codex
+   FAKE_PEEK=1   the moderator also tries to read .env (NAVI's guard must stop it)
+   a task with [says-done]: the moderator says it's done and stops without closing the session (as small models do)
+Like the real one, it runs the BeforeTool hooks in $GEMINI_CLI_HOME/.gemini/settings.json before every tool call: a hook
+that prints {"decision": "deny"} blocks the call; anything else (no output, a crash, a timeout) lets it through."""
+import json
+import os
+import re
+import subprocess
+import sys
+import time
+import uuid
+
+args = sys.argv[1:]
+log = open(os.environ.get("FAKE_LOG") or os.devnull, "a")
+
+
+def note(s):
+    log.write(s + "\n")
+    log.flush()
+
+
+note("gemini argv:\n" + "\n".join(f"  [{a}]" for a in args))
+note(f"gemini env: engine={os.environ.get('NAVI_ENGINE', '')} agent={os.environ.get('NAVI_AGENT', '')} home={os.environ.get('GEMINI_CLI_HOME', '')}")
+if args[:1] in (["--version"], ["-v"]):
+    print("0.0.0-fake")
+    sys.exit(0)
+prompt = args[args.index("-p") + 1] if "-p" in args else ""
+fmt = args[args.index("-o") + 1] if "-o" in args else "text"
+model = args[args.index("-m") + 1] if "-m" in args else "gemini-fake"
+sid = args[args.index("--session-id") + 1] if "--session-id" in args else args[args.index("-r") + 1] if "-r" in args else str(uuid.uuid4())
+if fmt == "json":           # navi asks one question
+    print(json.dumps({"session_id": sid, "response": "NAVI ONLINE" if "NAVI ONLINE" in prompt else "OK",
+                      "stats": {"models": {model: {"tokens": {"input": 40, "prompt": 40, "candidates": 3, "total": 43, "cached": 0, "thoughts": 0}}}}}))
+    sys.exit(0)
+
+
+def ev(o):
+    print(json.dumps({"timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ"), **o}), flush=True)
+
+
+def say(text):
+    for i in range(0, len(text), 12):
+        ev({"type": "message", "role": "assistant", "content": text[i:i + 12], "delta": True})
+    ev({"type": "message", "role": "assistant", "content": "", "delta": False})
+
+
+def hooks_say(tool, params):
+    """Gemini's BeforeTool hooks, as the real CLI runs them: the reason of the first deny, else None."""
+    try:
+        st = json.load(open(os.path.join(os.environ.get("GEMINI_CLI_HOME") or os.path.expanduser("~"), ".gemini", "settings.json")))
+    except (OSError, ValueError):
+        return None
+    if not (st.get("hooksConfig") or {}).get("enabled", True):
+        return None
+    for group in (st.get("hooks") or {}).get("BeforeTool") or []:
+        if group.get("matcher") not in (None, "", "*") and not re.search(group["matcher"], tool):
+            continue
+        for h in group.get("hooks") or []:
+            payload = {"session_id": sid, "cwd": os.getcwd(), "hook_event_name": "BeforeTool", "tool_name": tool, "tool_input": params}
+            try:
+                r = subprocess.run(h["command"], shell=True, input=json.dumps(payload), capture_output=True, text=True, timeout=h.get("timeout", 60000) / 1000)
+                out = json.loads(r.stdout or "{}")
+            except Exception:
+                continue                     # Gemini lets a failed hook through
+            if out.get("decision") in ("deny", "block"):
+                note(f"hook denied {tool}: {out.get('reason', '')[:160]}")
+                return out.get("reason") or "blocked"
+    return None
+
+
+def read(path):
+    tid = f"tool_{uuid.uuid4().hex[:6]}"
+    ev({"type": "tool_use", "tool_name": "read_file", "tool_id": tid, "parameters": {"file_path": path}})
+    why = hooks_say("read_file", {"file_path": path})
+    if why:
+        ev({"type": "tool_result", "tool_id": tid, "status": "error", "output": f"Tool execution blocked: {why}"})
+        return None
+    note(f"fake gemini read the file {path}")
+    ev({"type": "tool_result", "tool_id": tid, "status": "success", "output": open(path).read()[:300] if os.path.exists(path) else ""})
+    return True
+
+
+def run(cmd):
+    tid = f"tool_{uuid.uuid4().hex[:6]}"
+    ev({"type": "tool_use", "tool_name": "run_shell_command", "tool_id": tid, "parameters": {"command": cmd}})
+    why = hooks_say("run_shell_command", {"command": cmd})
+    if why:
+        ev({"type": "tool_result", "tool_id": tid, "status": "error", "output": f"Tool execution blocked: {why}"})
+        return subprocess.CompletedProcess(cmd, 1, "", why)
+    r = subprocess.run(cmd, shell=True, capture_output=True, text=True)
+    note(f"$ {cmd}\n{r.stdout}{r.stderr}".rstrip())
+    ev({"type": "tool_result", "tool_id": tid, "status": "success" if r.returncode == 0 else "error", "output": r.stdout[-300:]})
+    return r
+
+
+ev({"type": "init", "session_id": sid, "model": model})
+if "## Your assignment" in prompt:
+    me = os.environ.get("NAVI_AGENT") or "member"
+    run(f'navi status {me} "checking it" --state working')
+    run(f'navi send --from {me} --to all --kind verdict --subject "approve" --body "fake gemini member {me}: checked, no blockers"')
+    run(f'navi status {me} "done" --state done')
+    say(f"approve, no blockers ({me}, fake gemini member)")
+elif "[says-done]" in subprocess.run("navi brief", shell=True, capture_output=True, text=True).stdout:
+    run('navi status navi "the page is built and checked" --state done')
+    say("all done")
+    note("said done, stopped without ending")
+else:
+    run("navi brief")
+    lead = (re.search(r"lead[: ]*([a-z0-9_-]+)", run("navi council").stdout) or [None, "architect"])[1]
+    run('navi status navi "council seated on gemini" --state working')
+    if os.environ.get("FAKE_PEEK") == "1":
+        read(".env")
+        run("cat .env")
+    member = os.environ.get("FAKE_MEMBER") or lead
+    if member != "none":
+        run(f'navi run {member} "check the page"')
+    time.sleep(float(os.environ.get("FAKE_SLEEP") or 1))
+    if os.environ.get("FAKE_END") == "1":
+        run('navi end --summary "fake gemini session done"')
+    say("fake gemini moderator: done")
+ev({"type": "result", "status": "success", "stats": {"total_tokens": 31000, "input_tokens": 30000, "output_tokens": 1000, "cached": 12000,
+                                                       "duration_ms": 3000, "tool_calls": 5,
+                                                       "models": {model: {"tokens": {"input": 30000, "prompt": 30000, "candidates": 1000,
+                                                                                     "total": 31000, "cached": 12000, "thoughts": 200}}}}})
+note("gemini exit")
