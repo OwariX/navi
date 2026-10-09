@@ -1,6 +1,6 @@
 {
   "name": "navi",
-  "version": "0.9.020",
+  "version": "0.9.021",
   "description": "A council of AI agents that plans, challenges and builds your task while you watch it live in your browser, with a guard that keeps keys and .env files out of every agent's context.",
   "author": {
     "name": "OwariX",

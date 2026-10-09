@@ -3,6 +3,12 @@
 NAVI's versions are **MAJOR.MINOR.BUILD**. BUILD has three digits and counts every release (0.9.001, 0.9.002, ...);
 1.0.000 is the public launch. `navi update` brings your copy to the newest release, `navi --version` says which you have.
 
+## 0.9.021 (2026-10-09)
+
+- **A fresh start for the repository.** NAVI's GitHub history begins here; this changelog still tells every version's
+  story. Copies on 0.9.020 follow with `navi update` as usual. An older copy: reinstall it
+  (`git clone https://github.com/OwariX/navi && cd navi && ./install.sh`).
+
 ## 0.9.020 (2026-10-09)
 
 - **`navi update` follows NAVI's repository if it ever starts over.** When the history on GitHub is reset (the
