@@ -155,16 +155,28 @@ check(not os.path.exists(os.path.join(old, ".navi")) and len(moved) == 1 and os.
       "...and moves out to ~/.navi/projects once nothing runs on it, sessions and all", str(moved))
 check(r.returncode == 0 and "an old session" in (r.stdout + nrun(old, "brief").stdout), "...where NAVI carries on with it", r.stdout[-300:] + r.stderr[-300:])
 
+# NAVI's own data folder (~/.navi: projects/ and roots) is never taken for an old project's .navi, whatever HOME says:
+# a test that ran NAVI with a fake HOME from inside a real home once "moved" that home's ~/.navi into its fake one
+realish = os.path.join(gp, "realhome")
+os.makedirs(os.path.join(realish, ".navi", "projects", "work-1234abcd", "sessions"), exist_ok=True)
+open(os.path.join(realish, ".navi", "roots"), "w").write("/somewhere/work\n")
+os.makedirs(os.path.join(realish, "Documents", "proj"), exist_ok=True)
+nrun(os.path.join(realish, "Documents", "proj"), "doctor")
+nrun(realish, "doctor")
+check(os.path.isdir(os.path.join(realish, ".navi", "projects", "work-1234abcd", "sessions")) and os.path.isfile(os.path.join(realish, ".navi", "roots")),
+      "another home's ~/.navi stays exactly where it is (it's NAVI's data, not an old project folder)")
+check(not any(x.startswith(("realhome-", "Documents-")) for x in os.listdir(os.path.join(nhome, "projects"))),
+      "...and nothing of it lands in this NAVI's data", str(os.listdir(os.path.join(nhome, "projects"))))
 # a fresh install starts on Auto (where an engine has no auto mode, a council falls back to Ask me)
 r = subprocess.run([sys.executable, os.path.join(repo, "scripts", "navi.py"), "doctor"], capture_output=True, text=True, timeout=60,
-                   env={**env, "NAVI_CONFIG": os.path.join(gp, "fresh-config.json")})
+                   env={**env, "NAVI_CONFIG": os.path.join(gp, "fresh-config.json")}, cwd=home)
 check("permissions auto" in r.stdout, "a fresh install: permissions start on Auto", r.stdout[-300:])
 # Windows: NAVI says to use WSL rather than failing later (pseudo-terminals, file locks, process groups)
 win = [sys.executable, "-c", "import sys, os; sys.path.insert(0, sys.argv[1]); import navi; os.name = 'nt'; sys.argv = ['navi'] + sys.argv[2:]; navi.main()",
        os.path.join(repo, "scripts")]
-r = subprocess.run(win + ["doctor"], capture_output=True, text=True, timeout=60, env={**env, "NAVI_CONFIG": os.path.join(gp, "config.json")})
+r = subprocess.run(win + ["doctor"], capture_output=True, text=True, timeout=60, env={**env, "NAVI_CONFIG": os.path.join(gp, "config.json")}, cwd=home)
 check(r.returncode == 1 and "inside WSL" in r.stderr and "docs/WINDOWS.md" in r.stderr, "on Windows: NAVI says to run it inside WSL, and where the steps are", r.stdout + r.stderr)
-r = subprocess.run(win + ["--version"], capture_output=True, text=True, timeout=60, env={**env, "NAVI_CONFIG": os.path.join(gp, "config.json")})
+r = subprocess.run(win + ["--version"], capture_output=True, text=True, timeout=60, env={**env, "NAVI_CONFIG": os.path.join(gp, "config.json")}, cwd=home)
 check(r.returncode == 0 and "NAVI" in r.stdout, "...while `navi --version` still answers there")
 print("INSTALL SUITE PASSED" if not fails else f"INSTALL SUITE FAILED: {len(fails)}")
 sys.exit(1 if fails else 0)

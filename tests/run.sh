@@ -18,6 +18,7 @@ echo 20261006-144220 > "$SP/proj/.navi/current"
 echo '{"setup_complete": true, "vignette": 0, "moderator": "headless", "guides": false, "permissions": "ask", "engines_on": ["claude", "local", "codex", "local-codex", "gemini"]}' > "$SP/home/config.json"   # the tour suite turns guides on for itself; Ask me: the suites test its cards; every engine in use: the suites switch between them
 export NAVI_CONFIG="$SP/home/config.json" NAVI_LIBRARY="$SP/home/agents" NAVI_COUNCILS="$SP/home/councils" NAVI_NO_INTRO=1 BROWSER=true
 export NAVI_HOME="$SP/navihome"      # projects' NAVI data: never your ~/.navi
+REAL_NAVI=$(ls -d "$HOME/.navi" 2>/dev/null)      # yours, if you have one: it must be exactly there when the run ends
 export NAVI_KEEP_DOT_NAVI=1          # the shared suites use the old <project>/.navi layout on purpose (install_test tests the move)
 export FAKE_LOG="$SP/fake.log" FAKE_SLEEP=6
 # the engines: fakes on the PATH (above), and a Codex, a Gemini and an Ollama of their own, never yours
@@ -115,4 +116,7 @@ if want tui; then     # the setting says "terminal": the TUI must still get a ba
   run tui python3 -I "$HERE/tui_test.py" "$SP/uproj" "$SP"
 fi
 echo "screenshots: $SP/shots"
+if [ -n "$REAL_NAVI" ] && [ ! -d "$REAL_NAVI/projects" ]; then      # a test reached your own NAVI data: never again quietly
+  echo "FATAL: your $REAL_NAVI is gone or changed during the run. Look for it under $SP (and move it back)."; FAILED="$FAILED your-navi-data"
+fi
 [ -z "$FAILED" ] && echo "ALL SUITES PASSED" || { echo "FAILED:$FAILED"; exit 1; }

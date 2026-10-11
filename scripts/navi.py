@@ -225,13 +225,37 @@ def navi_dir() -> Path:
     env = os.environ.get("NAVI_DIR")
     if env:
         return Path(env).resolve()
-    here, stop = Path.cwd().resolve(), {Path.home().resolve(), Path("/")}
+    here, stop = Path.cwd().resolve(), homes() | {Path("/")}
     for d in [here, *here.parents]:         # in a subfolder: the project it's in, like git (never your home or the disk)
         if d in stop:
             break
-        if (d / ".navi").is_dir() or (G.data_dir(d) / "project.json").exists():
+        if old_project_data(d / ".navi") or (G.data_dir(d) / "project.json").exists():
             return project_dir(d)
     return project_dir(here)
+
+
+def homes() -> set:
+    """Your home folder, both as HOME says and as the system knows it (a test, or a tool, may set HOME elsewhere)."""
+    out = {Path.home().resolve()}
+    try:
+        import pwd
+        out.add(Path(pwd.getpwuid(os.getuid()).pw_dir).resolve())
+    except (ImportError, KeyError, OSError):
+        pass
+    return out
+
+
+def old_project_data(d: Path) -> bool:
+    """An old <project>/.navi/: a folder of one project's sessions and policy. Never NAVI's own data folder
+    (~/.navi, which holds projects/ and roots), whatever HOME says: that once got "moved" into a test's home."""
+    try:
+        if not d.is_dir() or d.is_symlink() or (d / "roots").exists() or (d / "projects").is_dir():
+            return False
+        if d.resolve() == G.NAVI_HOME.resolve() or any(d.resolve() == h / ".navi" for h in homes()):
+            return False
+    except OSError:
+        return False
+    return (d / "sessions").is_dir() or (d / "policy.json").exists() or (d / "current").exists()
 
 
 def project_dir(root: Path) -> Path:
@@ -240,7 +264,7 @@ def project_dir(root: Path) -> Path:
     NAVI's stays in your repository."""
     root = Path(root).expanduser().resolve()
     P, legacy = G.data_dir(root), root / ".navi"
-    if legacy.is_dir() and not legacy.is_symlink():
+    if old_project_data(legacy) and root not in homes():
         if os.environ.get("NAVI_KEEP_DOT_NAVI") == "1" or legacy_busy(legacy):       # (the tests keep their old layout)
             return legacy
         try:
@@ -314,7 +338,7 @@ def project_root(P: Path) -> Path:
 def navi_of(root: Path) -> Path:
     """A folder's NAVI data, wherever it is now (no moving): for listing projects."""
     root = Path(root)
-    return root / ".navi" if (root / ".navi").is_dir() else G.data_dir(root)
+    return root / ".navi" if old_project_data(root / ".navi") else G.data_dir(root)
 
 
 def die(msg: str, code: int = 1):
