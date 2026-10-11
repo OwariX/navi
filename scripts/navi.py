@@ -111,8 +111,12 @@ PLAYBOOK = {
     "standard": """STANDARD · normal features and changes. Target: a few minutes. One builder; reviewers are parallel, read-only.
   1. LEAD: a proposal of at most 8 lines: approach, the 1-3 decisions that matter, files touched, and "Done when: <checks>"
      covering every reviewer's lens (a secret grep for the security reviewer, page weight or SKU for the cost one).
-     No debate before building.
-  2. BUILD and run every check; keep the outputs.
+     No debate before building. Then show the user the plan in two lines without stopping: `navi ask --from navi
+     --question "Plan: <what you'll build, the look or approach, where> · building now" --option "Looks good"
+     --option "Change something" --no-wait`, and start building. Their answer reaches you after your next step: when
+     it changes the plan, change course then, not after the build (a council once built a whole site in the wrong
+     style because the plan was never shown).
+  2. BUILD and run every check; keep the outputs. Post a `navi milestone` when a big part is done.
   3. REVIEW the built result, not the plan: spawn ALL reviewers in one batch (subagents, instructions from
      `navi prompt <agent>`, model: the agent's model in the brief, yours when it says inherit), each given only the task, the proposal, the checks, the
      diff and the check output. At most 3 findings and one verdict each; only a blocker backed by evidence makes
@@ -1637,6 +1641,21 @@ def cmd_posthook(a):
         st["files"] = sorted(sent | {p.name for p in new})[-200:]
         mark_seen(sd, new)
     evs = read_events(sd / "log.jsonl")
+    nowait = {str(e.get("id")): e for e in evs if e.get("type") == "ask" and e.get("nowait")}   # nobody waits on these
+    done_r = set(st.get("replies") or [])
+    for qid, q in nowait.items():
+        f = sd / "replies" / f"{qid}.json"
+        if qid in done_r or not f.exists():
+            continue
+        try:
+            r = json.loads(f.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        said = " · ".join(x for x in (str(r.get("choice") or ""), str(r.get("text") or "")) if x)[:1500]
+        notes.append(f"The user answered your question \"{str(q.get('body') or '')[:200]}\": {said}. If it changes what "
+                     "you're doing, change course now.")
+        st["replies"] = sorted(done_r | {qid})[-200:]
+        done_r.add(qid)
     if not any(e.get("type") == "end" for e in evs):
         said = [e for e in evs if e.get("type") in ("milestone", "chat", "ask", "boot")
                 or (e.get("type") == "message" and e.get("agent") != "user")]
@@ -1647,7 +1666,7 @@ def cmd_posthook(a):
                          "`navi milestone \"<what's done> · <what's next>\"`.")
             st["nudged"] = time.time()
     if notes:
-        write_atomic(sd / "pushed.json", json.dumps(st))
+        write_atomic(sd / "pushed.json", json.dumps(st))       # (answers and messages: each pushed once)
         print(json.dumps({"hookSpecificOutput": {"hookEventName": "PostToolUse", "additionalContext": "\n\n".join(notes)[:9000]}}))
     elif new:
         write_atomic(sd / "pushed.json", json.dumps(st))
@@ -2178,8 +2197,9 @@ def cmd_ask(a):
     question, *options = outbound(d, agent, nl(a.question), *(a.option or []))       # \n is a line break, as in navi send
     qid = uuid.uuid4().hex[:8]
     (d / "replies").mkdir(exist_ok=True)
-    emit({"type": "ask", "agent": agent, "id": qid, "body": question, "options": options})
-    print(f"navi: asked the user (id {qid}) - waiting for the answer in the viewer ...", flush=True)
+    emit({"type": "ask", "agent": agent, "id": qid, "body": question, "options": options, **({"nowait": True} if a.no_wait else {})})
+    print(f"navi: asked the user (id {qid}) - " + ("the answer reaches you after a later step" if a.no_wait else
+                                                   "waiting for the answer in the viewer ..."), flush=True)
     if not a.no_wait:
         _await_reply(d, qid, a.timeout)
 

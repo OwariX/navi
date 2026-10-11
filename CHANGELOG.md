@@ -21,6 +21,16 @@ NAVI's versions are **MAJOR.MINOR.BUILD**. BUILD has three digits and counts eve
   model is still on hover.
 - The council's own files are tracked better: variables it set in the same command, `curl -o` and `wget -O`
   downloads; no more junk like `$D/...` or `/dev/null` in the list.
+- **From benchmarking a real council** (rebuilding a website, 43 minutes, $10.41):
+  - **The plan is shown to you before the build, without stopping it.** "Plan: … · building now", with *Looks good*
+    and *Change something*. Your answer reaches the moderator after its next step. That council built a whole site in
+    a style you didn't want because the plan never reached you.
+  - **Passwords for local testing never go in a message** (WARDEN hides them, and you couldn't read yours). The
+    moderator lets you choose it and says where to type it, and doesn't fight a tool's own password rules.
+- **Fixed: NAVI could move its own data folder.** When it looked for a project's data, an old-style `.navi` in a parent
+  folder counted, and `~/.navi` itself looked like one. Run from the right place (a test with another home folder, or
+  `navi` in your home folder), NAVI "migrated" `~/.navi` somewhere else. NAVI's own data folder is never taken for a
+  project's now, the search stops at your real home, and only a folder that looks like an old project is moved.
 
 ## 0.9.021 (2026-10-09)
 

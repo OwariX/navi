@@ -321,6 +321,17 @@ try:
     check("blue logo" not in posthook(), "...once, not after every tool call")
     check(subprocess.run([sys.executable, navi, "posthook"], input=json.dumps({"tool_name": "Bash", "agent_id": "sub-1"}), env=henv, cwd=proj,
                          capture_output=True, text=True, timeout=30).stdout.strip() == "", "...members' tool calls get nothing (the moderator relays)")
+    # the plan, shown without stopping (navi ask --no-wait): your answer reaches the moderator after its next step too
+    r = subprocess.run([sys.executable, navi, "ask", "--from", "navi", "--question", "Plan: a dark one-page site · building now",
+                        "--option", "Looks good", "--option", "Change something", "--no-wait"], env=henv, cwd=proj, capture_output=True, text=True, timeout=30)
+    qid2 = (r.stdout.split("(id ", 1)[1].split(")", 1)[0]) if "(id " in r.stdout else ""
+    check(bool(qid2) and "after a later step" in r.stdout, "navi ask --no-wait: the moderator carries on", r.stdout)
+    post_json("/reply", {"session": wsid, "id": qid2, "choice": "Change something", "text": "make it light, not dark"})
+    ctx = (json.loads(posthook() or "{}").get("hookSpecificOutput") or {}).get("additionalContext", "")
+    check("make it light, not dark" in ctx and "Plan: a dark one-page site" in ctx and "change course" in ctx,
+          "...and your answer is put in front of it after its next tool call", ctx[:300])
+    check("make it light" not in posthook(), "...once")
+    time.sleep(1.5)                      # (the question just asked counts as a word to the user)
     nudge = posthook(NAVI_QUIET_FOR="1")
     check("hasn't heard from the council" in nudge and "navi milestone" in nudge, "a moderator quiet for a while is reminded to tell you where things stand", nudge[:300])
     check(posthook(NAVI_QUIET_FOR="1") == "", "...not after every step")

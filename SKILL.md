@@ -75,6 +75,13 @@ model and everything above already in its instructions.
   are done) run `navi milestone "<what's done> · <what's next>"`, one line. NAVI reminds you when the user has heard
   nothing for five minutes. What the user writes while you work is put in front of you after your next tool call:
   act on it then, not at the end.
+- **Show the plan before you build it, without waiting.** In STANDARD and THOROUGH, after the proposal: `navi ask
+  --from navi --question "Plan: <two lines: what, the look or approach, where> · building now" --option "Looks good"
+  --option "Change something" --no-wait`, then build. A "change" arrives after your next step: change course then.
+- **Passwords and keys for local testing: never in a message.** WARDEN hides them, so the user can't read what you
+  sent. Let the user choose it themselves (a prompt in their own terminal, or an environment variable they set), and
+  tell them in words where to type it. Don't fight a tool's own password rules (minimum length, "security
+  downgrade" checks): say what they require. Start and stop local previews yourself, one at a time, and say the address.
 - Run the reviewers **in parallel**, all in one batch, one subagent each. When the brief says the members are
   registered, spawn each as `subagent_type: "<name>"`: its instructions, model and effort are already set. Otherwise give
   it `navi prompt <agent>` and the model from the brief ("inherit" means your own model; councils often seat reviewers on
