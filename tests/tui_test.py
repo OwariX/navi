@@ -315,6 +315,27 @@ try:
     log = open(f"{NAVID}/sessions/{sid()}/log.jsonl").read()
     check('"agent": "user"' in log and "hello from the tui" in log, "a typed line reaches the council through /say")
     key(b"\x1b", 0.2)
+    # 4b. you see what happens: the moderator has your message (seen), milestones, the heartbeat, a member's live card
+    subprocess.run(["navi", "posthook"], input=json.dumps({"tool_name": "Bash"}), env={**env, "NAVI_DIR": NAVID, "NAVI_HOST_ID": hid},
+                   capture_output=True, text=True, timeout=30)
+    wait_for(lambda s: "✓ seen by NAVI" in s, 10, "your message shows it reached NAVI (seen)")
+    navi("milestone", "tui e2e: the page is built · the reviewers check it now")
+    wait_for(lambda s: "MILESTONE" in s and "the page is built" in s, 10, "a milestone in the feed")
+    beat_ok = re.search(r"▸ ARCHITECT · \d+:\d\d · last step \d+[smh] ago", vt.text()) is not None
+    if not beat_ok:
+        print("--- header:\n" + "\n".join(vt.text().splitlines()[:3]))
+    check(beat_ok, "the heartbeat: who works, for how long, and the last step (top right)")
+    key(b"\r", 0.2)
+    key(b"/show arch", 0.3)
+    check("architect" in vt.text() and "take it" in vt.text(), "/show suggests the members as you type")
+    key(b"\t", 0.2); key(b"\r", 0.6)
+    scr = vt.text()
+    check("ARCHITECT" in scr and "d close" in scr and "reading the task" in scr, "/show architect: its live card, with its steps as they happen")
+    snap("show")
+    key(b"\x1b[C", 0.4)
+    check("ADVERSARY" in vt.text() and "d close" in vt.text(), "→ shows the next member")
+    key(b"d", 0.4)
+    check("d close" not in vt.text(), "d closes it")
     # 5. q while the council works: it asks first, and says the council keeps running
     key(b"q", 0.8)
     check("Leave the TUI?" in vt.text() and "background" in vt.text(), "q asks first while the council works, and says it keeps running")
@@ -329,7 +350,7 @@ try:
     lines = vt.text().splitlines()
     graph_row = next((i for i, ln in enumerate(lines) if "▌ ARCHITECT" in ln), -1)       # the agent's chip and name
     feed_row = next((i for i, ln in enumerate(lines) if ln.strip().startswith("FEED")), -1)
-    check(0 < graph_row < feed_row and any("ARCHITECT →" in ln for ln in lines[feed_row:]) and max(len(ln) for ln in lines) <= cols,
+    check(0 < graph_row < feed_row and any("ARCHITECT →" in ln or "MILESTONE" in ln or "YOU →" in ln for ln in lines[feed_row:]) and max(len(ln) for ln in lines) <= cols,
           f"narrow: the graph (ARCHITECT on row {graph_row}) sits above the feed (row {feed_row})")
     snap("narrow")
     # 7. the end: CONSENSUS, then q leaves without asking

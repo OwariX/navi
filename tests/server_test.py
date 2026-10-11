@@ -306,6 +306,28 @@ try:
         check(auto_card(c).get("behavior") == "deny", f"...refused: {c} ({why})")
     for c in ("npm test && npm run build", "rm -rf node_modules", "grep -rn region --include='*.tfvars' .", "terraform plan"):
         check(auto_card(c).get("behavior") == "allow", f"...runs: {c}")
+    # what you write while the moderator works reaches it after its next tool call (it used to wait until it chose to
+    # look: 12 minutes in a real council), your message shows "seen", and a moderator that has said nothing to you for
+    # a while is reminded to post a milestone
+    post_json("/say", {"session": wsid, "text": "use the blue logo please"})
+    posthook = lambda **extra: subprocess.run([sys.executable, navi, "posthook"], input=json.dumps({"tool_name": "Bash", "session_id": "m"}),
+                                              env={**henv, **extra}, cwd=proj, capture_output=True, text=True, timeout=30).stdout
+    out = posthook()
+    ctx = (json.loads(out or "{}").get("hookSpecificOutput") or {}).get("additionalContext", "")
+    check("use the blue logo please" in ctx and "act on it now" in ctx, "your message is put in front of the moderator after its next tool call", out[:300])
+    wlog = [json.loads(x) for x in open(f"{proj}/.navi/sessions/{wsid}/log.jsonl") if x.strip()]
+    useq = next(e["seq"] for e in reversed(wlog) if e["type"] == "message" and e.get("agent") == "user")
+    check(any(e["type"] == "seen" and useq in (e.get("seqs") or []) for e in wlog), "...and it shows seen (a seen event for that message)")
+    check("blue logo" not in posthook(), "...once, not after every tool call")
+    check(subprocess.run([sys.executable, navi, "posthook"], input=json.dumps({"tool_name": "Bash", "agent_id": "sub-1"}), env=henv, cwd=proj,
+                         capture_output=True, text=True, timeout=30).stdout.strip() == "", "...members' tool calls get nothing (the moderator relays)")
+    nudge = posthook(NAVI_QUIET_FOR="1")
+    check("hasn't heard from the council" in nudge and "navi milestone" in nudge, "a moderator quiet for a while is reminded to tell you where things stand", nudge[:300])
+    check(posthook(NAVI_QUIET_FOR="1") == "", "...not after every step")
+    r = run("milestone", "built the page · reviewers check it now")
+    check(r.returncode == 0 and any(e["type"] == "milestone" and "reviewers check it" in e.get("body", "")
+                                    for e in (json.loads(x) for x in open(f"{proj}/.navi/sessions/{open(f'{proj}/.navi/current').read().strip()}/log.jsonl") if x.strip())),
+          "navi milestone: where things stand, in the session for the feed", r.stdout + r.stderr)
     # what the council made itself: no questions about it (you asked: "don't ask permission for files NAVI created")
     N.set_session_perms(_P2(f"{proj}/.navi/sessions/{wsid}"), "ask")
     hook({"tool_name": "Write", "tool_input": {"file_path": f"{proj}/example.tfvars", "content": "region = \"x\""}, "cwd": proj})

@@ -90,6 +90,33 @@ class ClaudeStream(Stream):
         super().__init__(model)
         self.counted: set = set()
         self.last = ""
+        self.subs: dict = {}      # the tool call that started a subagent -> the council member it is
+        self.acting = ""          # the member the moderator itself works as (the lead building): its last `navi status x`
+
+    WORKS_AS = re.compile(r"\bnavi(?:\.py)? status ([a-z0-9_-]{1,32})\b")
+    SPEAKS_AS = re.compile(r"\bnavi(?:\.py)? (?:status|think|artifact) ([a-z0-9_-]{1,32})\b|\bnavi(?:\.py)? (?:send|ask)\b[^;&|]*?--from ([a-z0-9_-]{1,32})\b")
+
+    def who(self, m: dict, c: dict) -> tuple[str, str]:
+        """Which council member made this tool call: (agent, acting as). A subagent's messages carry the call that
+        started it (parent_tool_use_id), which names the member; the moderator's own calls count as the member it says
+        it works as (`navi status architect ... --state working`)."""
+        pid, inp = m.get("parent_tool_use_id"), c.get("input") or {}
+        cmd = str(inp.get("command") or "") if c.get("name") == "Bash" else ""
+        if pid:
+            if pid not in self.subs and cmd:
+                hit = self.SPEAKS_AS.search(cmd)
+                name = (hit.group(1) or hit.group(2)) if hit else ""
+                if name and name not in ("navi", "user", "all"):
+                    self.subs[pid] = name
+            return self.subs.get(pid, ""), ""
+        if c.get("name") in ("Task", "Agent"):           # the moderator starting a member: its own act, not the lead's
+            if re.fullmatch(r"[a-z0-9_-]{1,32}", str(inp.get("subagent_type") or "").lower()):
+                self.subs[c.get("id")] = str(inp["subagent_type"]).lower()
+            return "", ""
+        hit = self.WORKS_AS.search(cmd) if cmd and "--state" in cmd else None
+        if hit:
+            self.acting = "" if hit.group(1) in ("navi", "user") or "--state done" in cmd and not "--state working" in cmd else hit.group(1)
+        return "", self.acting
 
     def feed(self, m: dict) -> list[dict]:
         out, t = [], m.get("type")
@@ -99,10 +126,13 @@ class ClaudeStream(Stream):
                 if c.get("type") == "tool_use":
                     inp = c.get("input") or {}
                     text = inp.get("command") or inp.get("file_path") or inp.get("pattern") or inp.get("description") or inp.get("prompt") or json.dumps(inp)[:200]
-                    out.append({"kind": "tool", "tool": c.get("name", ""), "text": str(text)[:300]})
+                    agent, acting = self.who(m, c)
+                    out.append({"kind": "tool", "tool": c.get("name", ""), "text": str(text)[:300],
+                                **({"agent": agent} if agent else {}), **({"as": acting} if acting else {})})
                 elif c.get("type") == "text" and (c.get("text") or "").strip():
                     self.last = c["text"].strip()
-                    out.append({"kind": "text", "text": self.last[:400]})
+                    pid = m.get("parent_tool_use_id")
+                    out.append({"kind": "text", "text": self.last[:400], **({"agent": self.subs[pid]} if pid in self.subs else {})})
             if isinstance(msg.get("usage"), dict) and msg.get("id") not in self.counted:
                 self.counted.add(msg.get("id"))
                 u = msg["usage"]
@@ -233,6 +263,8 @@ def claude_settings(guard: dict) -> dict:
     if guard.get("permit"):
         hooks["PermissionRequest"] = [{"matcher": "*", "hooks": [{"type": "command", "command": guard["permit"],
                                                                  "timeout": int(guard.get("permit_timeout") or 600)}]}]
+    if guard.get("post"):          # after each tool call: what the user wrote meanwhile, in front of the moderator at once
+        hooks["PostToolUse"] = [{"matcher": "*", "hooks": [{"type": "command", "command": guard["post"], "timeout": 15}]}]
     return {"hooks": hooks, "permissions": {"deny": list(guard.get("deny") or [])}}
 
 

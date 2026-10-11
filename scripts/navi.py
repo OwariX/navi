@@ -528,6 +528,14 @@ def outbound(d: Path, agent: str, *texts: str) -> list[str]:
     return out
 
 
+def mark_seen(d: Path, files) -> None:
+    """The moderator has your messages (it read them, or NAVI put them in front of it): each one shows "seen ✓"."""
+    seqs = sorted({int(p.name.split("-", 1)[0]) for p in files if p.name.endswith("-user.md") and p.name.split("-", 1)[0].isdigit()})
+    if seqs:
+        with in_session(d):
+            emit({"type": "seen", "agent": "navi", "seqs": seqs})
+
+
 def deliver(d: Path, ev: dict, targets) -> None:
     """Drop a message event into each target's inbox as a markdown file with frontmatter."""
     header = "\n".join(f"{k}: {json.dumps(ev[k], ensure_ascii=False) if isinstance(ev[k], str) else ev[k]}"
@@ -1559,6 +1567,73 @@ def cmd_inbox(a):
         if not a.peek:
             (box / "read").mkdir(exist_ok=True)
             p.rename(box / "read" / p.name)
+    if not a.peek and who(a.agent) == "navi":
+        mark_seen(d, msgs)
+
+
+def cmd_milestone(a):
+    """`navi milestone "Built: the site and /admin · the reviewers check it now"`: where things stand, for the user, in
+    a line. Statuses only change a member's line on the graph; milestones are what the user reads in the feed."""
+    d = require()
+    text = outbound(d, "navi", nl(" ".join(a.text)).strip())[0]
+    if not text:
+        die("say what's done, and what's next")
+    ev = emit({"type": "milestone", "agent": "navi", "body": text[:600]})
+    print(f"navi: #{ev['seq']} milestone")
+
+
+QUIET_FOR = int(os.environ.get("NAVI_QUIET_FOR") or 300)   # seconds without a word to the user before the moderator is reminded
+
+
+def cmd_posthook(a):
+    """Claude Code's PostToolUse hook, for NAVI's moderators: what the user writes while it works is put in front of it
+    right after its next tool call (before, it waited until the moderator chose to look, ten minutes and more), and a
+    moderator that has said nothing to the user for a while is reminded to say where things stand."""
+    try:
+        data = json.load(sys.stdin)
+    except (json.JSONDecodeError, ValueError):
+        return
+    nd, hid = os.environ.get("NAVI_DIR", ""), os.environ.get("NAVI_HOST_ID", "")
+    if os.environ.get("NAVI_AGENT") or not isinstance(data, dict) or data.get("agent_id"):
+        return          # a member, not the moderator: the moderator relays what concerns it
+    h = read_host(Path(nd), hid) if nd and re.fullmatch(r"[0-9a-f]{8}", hid) else None
+    sd = Path(nd) / "sessions" / str((h or {}).get("session") or "-")
+    if not h or not (sd / "log.jsonl").exists():
+        return
+    try:
+        st = json.loads((sd / "pushed.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        st = {}
+    box, sent, notes = sd / "inbox" / "navi", set(st.get("files") or []), []
+    new = [p for p in sorted(box.glob("*-user.md")) if p.name not in sent] if box.is_dir() else []
+    if new:
+        texts = [p.read_text(encoding="utf-8").split("\n---\n", 1)[-1].strip()[:1500] for p in new[:5]]
+        notes.append("The user just wrote to you while you work. It may change what you're doing: act on it now, then run "
+                     "`navi inbox navi` to mark it read.\n" + "\n\n".join("> " + t.replace("\n", "\n> ") for t in texts))
+        st["files"] = sorted(sent | {p.name for p in new})[-200:]
+        mark_seen(sd, new)
+    evs = read_events(sd / "log.jsonl")
+    if not any(e.get("type") == "end" for e in evs):
+        said = [e for e in evs if e.get("type") in ("milestone", "chat", "ask", "boot")
+                or (e.get("type") == "message" and e.get("agent") != "user")]
+        quiet = time.time() - max([epoch_of(e.get("ts")) for e in said] or [time.time()])
+        if quiet >= QUIET_FOR and time.time() - float(st.get("nudged") or 0) >= QUIET_FOR:
+            notes.append(f"The user hasn't heard from the council for {int(quiet // 60)} minutes (statuses only show on the "
+                         "graph). Tell them where things stand in one line, then carry on: "
+                         "`navi milestone \"<what's done> · <what's next>\"`.")
+            st["nudged"] = time.time()
+    if notes:
+        write_atomic(sd / "pushed.json", json.dumps(st))
+        print(json.dumps({"hookSpecificOutput": {"hookEventName": "PostToolUse", "additionalContext": "\n\n".join(notes)[:9000]}}))
+    elif new:
+        write_atomic(sd / "pushed.json", json.dumps(st))
+
+
+def epoch_of(ts) -> float:
+    try:
+        return datetime.fromisoformat(str(ts).replace("Z", "+00:00")).timestamp()
+    except ValueError:
+        return 0.0
 
 
 def cmd_think(a):
@@ -2124,6 +2199,7 @@ def cmd_listen(a):
     for p in msgs:
         print(p.read_text(encoding="utf-8").rstrip(), end="\n\n")
         p.rename(box / "read" / p.name)
+    mark_seen(d, msgs)
 
 
 def cmd_setup(a):
@@ -2377,6 +2453,7 @@ def cmd_brief(a):
         for p in msgs:
             print("  " + p.read_text(encoding="utf-8").rstrip().replace("\n", "\n  "))
             p.rename(box / "read" / p.name)
+        mark_seen(d, msgs)
     if info["events"] > 12 and not info["ended"]:
         print("\nthis session has history: run `navi log` before acting, and don't redo finished rounds.")
     print("\nNAVI rules (every agent, every pace, whatever its persona says; `navi prompt <agent>` puts them at the top of a "
@@ -3487,6 +3564,7 @@ def guard_spec(headless: bool = False, P: Path | None = None) -> dict:
     me = Path(__file__).resolve()
     return {"hook": f'python3 "{me}" hook', "tools": HOOK_TOOLS, "deny": list(GUARD_DENY_RULES),
             "permit": f'python3 "{me}" permit' if headless else "", "permit_timeout": int(permit_wait()) + 30,
+            "post": f'python3 "{me}" posthook',          # what the user writes reaches the moderator after its next step
             "home": str((P or navi_dir()) / "hosts" / "gemini-home"),     # engines that need a home of NAVI's for it (Gemini)
             "data": str(P or navi_dir())}          # NAVI's data for this project (outside it): a sandbox must let `navi` write there
 
@@ -3817,6 +3895,11 @@ def pump_stream(stream, log_path: Path, trace_path: Path, on_result, live_path: 
             if not isinstance(m, dict):
                 continue
             for t in parser.feed(m):
+                if t.get("kind") == "tool":            # the step in words, for the members' live cards
+                    try:
+                        t = {**t, "words": step_words(str(t.get("tool") or ""), str(t.get("text") or ""))}
+                    except Exception:
+                        pass
                 tf.write(json.dumps({"ts": now(), **t, **(tag or {})}, ensure_ascii=False) + "\n")
                 if on_init and t.get("kind") == "init":
                     try:
@@ -5038,6 +5121,24 @@ def plain_summary(tool: str, ti: dict) -> str:
     if tool.startswith("mcp__") and tool.count("__") >= 2:
         return f"Use {tool.split('__')[1]}: {tool.split('__')[-1].replace('_', ' ')}"
     return f"Use {tool}"
+
+
+def step_words(tool: str, text: str) -> str:
+    """One step of a member's work, in words, for its live card (`/show` in the TUI, a click in the browser). '' for
+    what reaches the log anyway (statuses, messages)."""
+    t = " ".join(str(text or "").split())
+    short = (lambda x: "/".join(Path(x).parts[-2:]) if "/" in x else x)
+    if tool == "Bash":
+        if re.match(r"navi(\.py)? (status|send|think|milestone|ask|artifact|chat)\b", t):
+            return ""
+        if re.match(r"navi(\.py)? (listen|inbox|brief)\b", t):
+            return "checked for news from you and the council"
+        return plain_summary("Bash", {"command": t})
+    return {"Write": f"wrote {short(t)}", "Edit": f"changed {short(t)}", "MultiEdit": f"changed {short(t)}",
+            "Read": f"read {short(t)}", "NotebookEdit": f"changed {short(t)}", "Grep": f"searched the files for {t[:60]}",
+            "Glob": f"looked for files {t[:60]}", "WebFetch": f"opened {t[:80]}", "WebSearch": f"searched the web for {t[:60]}",
+            "Agent": f"started a member: {t[:70]}", "Task": f"started a member: {t[:70]}", "SendMessage": "wrote to a member",
+            "SubagentHandback": "handed its result back", "TodoWrite": "updated its to-do list", "ToolSearch": ""}.get(tool, f"used {tool}")
 
 
 def permit_target(tool: str, ti: dict) -> str:
@@ -6574,6 +6675,13 @@ def main():
     s.add_argument("agent")
     s.add_argument("--peek", action="store_true", help="don't mark as read")
     s.set_defaults(fn=cmd_inbox)
+
+    s = sub.add_parser("milestone", help="moderator: tell the user where things stand, in one line (shown in the feed)")
+    s.add_argument("text", nargs="+")
+    s.set_defaults(fn=cmd_milestone)
+
+    s = sub.add_parser("posthook", help="Claude Code PostToolUse hook entrypoint (NAVI's moderators)")
+    s.set_defaults(fn=cmd_posthook)
 
     s = sub.add_parser("think", help="broadcast a thought")
     s.add_argument("agent")

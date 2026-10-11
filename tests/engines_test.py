@@ -55,6 +55,19 @@ check((C.resolve(cfg, "strong"), C.resolve(cfg, "fable"), C.describe(cfg, "balan
 check((C.resolve(cfg, "auto"), C.member_alias(cfg, "auto"), L.member_alias(cfg, "auto"), C.describe(cfg, "auto"), E.valid_model("auto")) ==
       ("", "inherit", "inherit", "Auto · picked per task", True),
       "a seat on auto: registered without a model of its own (the moderator picks one per run), shown as picked per task")
+# who did what: every tool call in the live trace carries its member (a subagent by the call that started it, the
+# moderator's own work as the member it says it works as), for the members' live cards
+cs = E.ClaudeStream()
+tags = [[(x.get("tool"), x.get("agent"), x.get("as")) for x in cs.feed(m)] for m in [
+    {"type": "assistant", "message": {"id": "1", "content": [{"type": "tool_use", "id": "t1", "name": "Bash", "input": {"command": 'navi status architect "building" --state working'}}]}},
+    {"type": "assistant", "message": {"id": "2", "content": [{"type": "tool_use", "id": "t2", "name": "Write", "input": {"file_path": "/x/a.js"}}]}},
+    {"type": "assistant", "message": {"id": "3", "content": [{"type": "tool_use", "id": "t3", "name": "Agent", "input": {"subagent_type": "adversary", "prompt": "review"}}]}},
+    {"type": "assistant", "parent_tool_use_id": "t3", "message": {"id": "4", "content": [{"type": "tool_use", "id": "t4", "name": "Read", "input": {"file_path": "/x/a.js"}}]}},
+    {"type": "assistant", "parent_tool_use_id": "t9", "message": {"id": "5", "content": [{"type": "tool_use", "id": "t5", "name": "Bash", "input": {"command": 'navi status ledger "cost" --state working'}}]}},
+    {"type": "assistant", "parent_tool_use_id": "t9", "message": {"id": "6", "content": [{"type": "tool_use", "id": "t6", "name": "Bash", "input": {"command": "grep x y"}}]}}]]
+check(tags == [[("Bash", None, "architect")], [("Write", None, "architect")], [("Agent", None, None)], [("Read", "adversary", None)],
+               [("Bash", "ledger", None)], [("Bash", "ledger", None)]],
+      "the live trace says who did each step: the lead's work, a member started by the moderator, a member known by its own commands", str(tags))
 cmd = C.moderator(cfg, prompt="P", model="balanced", effort="high", headless=True, conv="c-1", cont=False, perms="all", add_dirs=["/d"],
                   rules=["Bash(navi:*)"], guard=GUARD, agents="/a.json")
 st = json.loads(cmd[cmd.index("--settings") + 1])

@@ -240,6 +240,9 @@ def write_targets(toks: list[str]) -> list[str]:
         out.append(args[-1])
     elif name in ("touch", "mkdir"):
         out += args
+    elif name in ("curl", "wget"):              # a download saved to a file: curl -o f, wget -O f
+        flags = ("-o", "--output") if name == "curl" else ("-O", "--output-document")
+        out += [plain[i + 1] for i, t in enumerate(plain[:-1]) if t in flags]
     return out
 
 
@@ -341,17 +344,35 @@ def path_words(toks: list[str], here: Path) -> list[str]:
 
 
 def shell_writes(cmd: str, cwd: Path) -> list[Path]:
-    """The files a shell command writes (redirects, tee, cp/mv/install targets, touch), resolved, following its `cd`s."""
-    out, here = [], cwd
+    """The files a shell command writes (redirects, tee, cp/mv/install targets, touch), resolved, following its `cd`s
+    and the variables it sets itself (`D=/x; ... > $D/f`). What can't be known from the words alone (a `{a,b}` list, a
+    variable set somewhere else) and /dev/null aren't files it made."""
+    out, here, local = [], cwd, {}
+
+    def expand(t: str) -> str:
+        t = re.sub(r"\$\{?([A-Za-z_][A-Za-z0-9_]*)\}?", lambda m: local.get(m.group(1), os.environ.get(m.group(1), m.group(0))), t)
+        return "" if "$" in t or "{" in t or "*" in t or "`" in t else t
     for seg in split_commands(cmd):
         try:
             toks = shlex.split(seg)
         except ValueError:
             toks = seg.split()
-        if toks and toks[0] == "cd":
-            here = resolve(os.path.expandvars(toks[1]) if len(toks) > 1 and toks[1] != "-" else "~", here)
+        while toks and re.match(r"^[A-Za-z_][A-Za-z0-9_]*=", toks[0]):      # D=/x (alone, or before a command)
+            k, _, v = toks.pop(0).partition("=")
+            local[k] = expand(v) or v
+        if toks and toks[0] == "export":
+            for t in toks[1:]:
+                if re.match(r"^[A-Za-z_][A-Za-z0-9_]*=", t):
+                    k, _, v = t.partition("=")
+                    local[k] = expand(v) or v
             continue
-        out += [resolve(os.path.expandvars(t), here) for t in write_targets(shell_words(seg))]
+        if toks and toks[0] == "cd":
+            here = resolve(expand(toks[1]) or "." if len(toks) > 1 and toks[1] != "-" else "~", here)
+            continue
+        for t in write_targets(shell_words(seg)):
+            t = expand(t)
+            if t and t != "/dev/null" and not t.startswith("/dev/"):
+                out.append(resolve(t, here))
     return out
 
 

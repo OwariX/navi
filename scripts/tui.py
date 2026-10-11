@@ -85,7 +85,8 @@ TIERS = ("strong", "balanced", "fast")
 TIER_OF = {"strong": "strong", "balanced": "balanced", "fast": "fast", "opus": "strong", "fable": "strong", "sonnet": "balanced", "haiku": "fast"}
 EFFORTS = ("", "low", "medium", "high")
 EFFORTS_ALL = ("", "low", "medium", "high", "xhigh", "max")
-COMMANDS = {"new": "after the end: run the council again on a new task (/new <task>)",
+COMMANDS = {"show": "a council member's live card: what it's doing right now (/show architect · d closes it)",
+            "new": "after the end: run the council again on a new task (/new <task>)",
             "cd": "work in another folder (/cd <path>, relative to where you are; /cd alone says where you are)",
             "end": "ask the council to wrap up and close the session", "stop": "pause NAVI on this session (/continue resumes it)",
             "continue": "resume NAVI on this session (it picks up where it left off)",
@@ -283,6 +284,31 @@ PUMPKIN = ("   _)_    ", " ,'^ ^`.  ", "(  vvv  ) ", " `.___,'  ")
 def halloween() -> bool:
     v = os.environ.get("NAVI_HALLOWEEN", "")
     return v == "1" or (v != "0" and datetime.now().month == 10)
+
+
+PLAIN = None          # navi.plain_summary, set by App: a shell command in words
+
+
+def step_words(tool: str, text: str) -> str:
+    """One step of a member's work, in words, for its live card (/show). '' for what shows up elsewhere anyway."""
+    t = oneline(text)
+    short = (lambda x: "/".join(Path(x).parts[-2:]) if "/" in x else x)
+    if tool == "Bash":
+        if re.match(r"navi(\.py)? (status|send|think|milestone|ask|artifact|chat)\b", t):
+            return ""          # those reach the log as statuses and messages
+        if re.match(r"navi(\.py)? (listen|inbox|brief)\b", t):
+            return "checked for news from you and the council"
+        return PLAIN("Bash", {"command": t}) if PLAIN else ("ran " + t.split()[0] if t else "ran a command")
+    return {"Write": f"wrote {short(t)}", "Edit": f"changed {short(t)}", "MultiEdit": f"changed {short(t)}",
+            "Read": f"read {short(t)}", "NotebookEdit": f"changed {short(t)}", "Grep": f"searched the files for {t[:60]}",
+            "Glob": f"looked for files {t[:60]}", "WebFetch": f"opened {t[:80]}", "WebSearch": f"searched the web for {t[:60]}",
+            "Agent": f"started a member: {t[:70]}", "Task": f"started a member: {t[:70]}", "SendMessage": "wrote to a member",
+            "SubagentHandback": "handed its result back", "TodoWrite": "updated its to-do list", "ToolSearch": ""}.get(tool, f"used {tool}")
+
+
+def ago(secs: float) -> str:
+    secs = max(0, int(secs))
+    return f"{secs}s ago" if secs < 60 else f"{secs // 60}m ago" if secs < 3600 else f"{secs // 3600}h ago"
 
 
 def epoch(ts) -> float | None:
@@ -1046,6 +1072,11 @@ class Council:
         self.end_t: float | None = None
         self.msgs, self.files, self.unread = 0, [], 0
         self.guard = (-99.0, OK)
+        self.activity: dict = {}       # member -> its steps (when, kind, words, the raw command), newest last: /show
+        self.last_step = 0.0           # when anything last happened: the heartbeat
+        self.work: dict = {}           # member -> since when it works (its status says working)
+        self.user_items: dict = {}     # the seq of your message -> its feed item, for "seen ✓"
+        self.seen: set = set()
         self.hub_own = 0.0
         try:
             meta = json.loads((self.dir / "session.json").read_text(encoding="utf-8"))
@@ -1191,6 +1222,11 @@ class Council:
         elif t == "status":
             n = self.node(agent)
             self.status(n, ev.get("state") if ev.get("state") in STATE_ICON else "working", oneline(body), ev)
+            self.act(agent, "status", oneline(body), ts)
+            if ev.get("state", "working") == "working":
+                self.work.setdefault(agent, epoch(ts) or time.time())
+            else:
+                self.work.pop(agent, None)
             if n is self.hub:
                 self.hub_own = time.time()
             if ev.get("state") == "blocked":
@@ -1327,6 +1363,13 @@ class Council:
         elif t == "notice":                # something you should know, from NAVI itself (auto mode is off, say)
             self.add(Item([(tm, sty(DIM)), ("! ", sty(AMBER, bold=True)), (oneline(ev.get("title")) or "note", sty(AMBER, bold=True))],
                           None, [(line, sty(INK), 6) for line in body.splitlines() if line.strip()] or [("", sty(INK), 1)]))
+        elif t == "milestone":                 # where things stand, from the moderator: what you read in the feed
+            self.add(Item([(tm, sty(DIM)), ("★ ", sty(OK, bold=True)), ("MILESTONE", sty(OK, bold=True))], (oneline(body), sty(INK, bold=True), 4)))
+            self.act("navi", "milestone", oneline(body), ts)
+        elif t == "seen":                      # the moderator has your messages
+            for q in ev.get("seqs") or []:
+                self.seen.add(int(q))
+                self.mark_seen(int(q))
         elif t == "upload":
             if body:
                 self.add(Item([(tm, sty(DIM)), ("◈ ", sty(AMBER)), ("WARDEN", sty(AMBER, bold=True))], (oneline(body), sty(AMBER), 2)))
@@ -1341,6 +1384,12 @@ class Council:
             self.add(Item([(tm, sty(DIM)), ("✓ CLOSED" if mine else "✓ CONSENSUS", sty(OK, bold=True))], (oneline(body), sty(INK), 4)))
             if self.live and not mine:
                 self.signals.append(("end", None))
+
+    def mark_seen(self, seq: int):
+        it = self.user_items.get(seq)
+        if it is not None and not getattr(it, "seen", False):
+            it.body.append(("✓ seen by NAVI", sty(OK), 6))
+            it.seen, it._w = True, -1
 
     def on_message(self, ev: dict, agent: str, body: str, tm: str):
         kind, to = str(ev.get("kind") or "note"), str(ev.get("to") or "navi").lower()
@@ -1357,8 +1406,12 @@ class Council:
         if agent == "user":
             intent = str(ev.get("intent") or "message")
             tag = [] if intent == "message" else [(" " + intent.upper(), sty(CYAN, bold=True))]
-            self.add(Item([(tm, sty(DIM)), ("YOU", sty(WHITE, bold=True)), (" → ", sty(DIM)), self.who(to)] + tag,
-                          (oneline(text) or subject, sty(INK), 4)))
+            item = Item([(tm, sty(DIM)), ("YOU", sty(WHITE, bold=True)), (" → ", sty(DIM)), self.who(to)] + tag,
+                        (oneline(text) or subject, sty(INK), 4))
+            self.add(item)
+            self.user_items[int(ev.get("seq") or 0)] = item
+            if int(ev.get("seq") or 0) in self.seen:
+                self.mark_seen(int(ev.get("seq") or 0))
             return
         label, color = KIND_LABEL.get(kind, kind.upper()), KIND_COLOR.get(kind, INK)
         if kind == "verdict":
@@ -1368,11 +1421,28 @@ class Council:
             if self.pace == "quick":            # in QUICK the lead checks through this lens itself: say so
                 label = "QUICK CHECK · " + label
         rest = oneline(text)
+        self.act(agent, "message", f"{label.lower()} → {to}: {subject}", ev.get("ts"))
         self.add(Item([(tm, sty(DIM)), self.who(agent), (" → ", sty(DIM)), self.who(to, bold=False), ("  " + label, sty(color, bold=True))],
                       None, [(subject, sty(INK, bold=True), 3)] + ([(rest, sty(MUTED), 2)] if rest and rest != subject else [])))
 
+    def act(self, who: str, kind: str, text: str, ts=None, raw: str = ""):
+        """A step in a member's work, for its live card. Every step counts for the heartbeat."""
+        when = epoch(ts) or time.time()
+        self.last_step = max(self.last_step, when)
+        if text:
+            lst = self.activity.setdefault(who or "navi", [])
+            lst.append((when, kind, text, raw))
+            del lst[:-400]
+
     def on_trace(self, tr: dict):
-        """What the background Claude Code is doing right now: shown on the hub while it hasn't said so itself."""
+        """What the background Claude Code is doing right now: shown on the hub while it hasn't said so itself, and step
+        by step on the live card of the member doing it (its tag: the subagent, or the member the moderator works as)."""
+        who = str(tr.get("agent") or tr.get("as") or "navi")
+        if tr.get("kind") == "tool":
+            words = tr["words"] if "words" in tr else step_words(str(tr.get("tool") or ""), str(tr.get("text") or ""))
+            self.act(who, "tool", oneline(words), tr.get("ts"), oneline(tr.get("text"))[:200])
+        elif tr.get("kind") == "text":
+            self.act(who, "text", oneline(tr.get("text"))[:240], tr.get("ts"))
         if tr.get("kind") == "tool" and not self.ended and time.time() - self.hub_own > 20:
             self.hub.state, self.hub.text = "working", f"{oneline(tr.get('tool')).lower()} · {oneline(tr.get('text'))}"
             self.hub.since = time.time()
@@ -1450,6 +1520,9 @@ class App:
 
     def __init__(self, N, P: Path, api: Api, session: str | None):
         self.N, self.P, self.api = N, P, api
+        global PLAIN
+        PLAIN = getattr(N, "plain_summary", None)
+        self.show_who, self.show_scroll = "", 0
         self.project = N.project_root(P)
         self.branch = git_branch(self.project)
         self.term = Term()
@@ -1638,6 +1711,18 @@ class App:
             return
         if self.overlay == "help":
             self.overlay = None
+            return
+        if self.overlay == "show":            # a member's live card: d (or esc) closes it, ←→ the next member
+            names = ["navi"] + list(self.c.nodes) if self.c else ["navi"]
+            if k in ("d", "D", "esc", "q", "ctrl-c"):
+                self.overlay = None
+            elif k in ("left", "right", "tab", "btab"):
+                i = names.index(self.show_who) if self.show_who in names else 0
+                self.show_who, self.show_scroll = names[(i + (1 if k in ("right", "tab") else -1)) % len(names)], 0
+            elif k in ("pgup", "up", "k"):
+                self.show_scroll += 8 if k == "pgup" else 1
+            elif k in ("pgdn", "down", "j"):
+                self.show_scroll = max(0, self.show_scroll - (8 if k == "pgdn" else 1))
             return
         if self.overlay == "chatintro":       # any key: got it (once; `navi --onboarding` shows it again)
             self.overlay = None
@@ -2174,8 +2259,18 @@ class App:
         if not self.focus or not self.c:
             return "", "", []
         t = self.input.text[:self.input.pos]
+        if self.sug_off == (self.input.text, self.input.pos):
+            return "", "", []
+        sm = re.match(r"^/show\s+([\w-]*)$", t)           # /show <member>: the members, like @agent
+        if sm:
+            word = sm.group(1).lower()
+            pool = [("navi", "the moderator", WHITE)] + [(n.name, n.role or n.text or "", n.color) for n in self.c.nodes.values()]
+            hits = [x for x in pool if x[0].startswith(word)] or [x for x in pool if word and word in x[0]]
+            if ("/show", word) != self.sug_key:
+                self.sug_key, self.sug_i = ("/show", word), 0
+            return ("", word, []) if len(hits) == 1 and hits[0][0] == word else ("", word, hits[:8])
         m = re.search(r"(^|\s)([@/])([\w-]*)$", t)
-        if not m or (m.group(2) == "/" and m.start(2) != 0) or self.sug_off == (self.input.text, self.input.pos):
+        if not m or (m.group(2) == "/" and m.start(2) != 0):
             return "", "", []
         sigil, word = m.group(2), m.group(3).lower()
         if sigil == "/":
@@ -2226,6 +2321,14 @@ class App:
             self.input.set("")
             if cmd == "help":
                 self.overlay = "help"
+            elif cmd == "show":
+                arg = (text[1:].split()[1:] or [""])[0].lower().lstrip("@")
+                names = ["navi"] + list(c.nodes)
+                busy = max(((v, k) for k, v in c.work.items() if k in c.nodes), default=(0, "navi"))[1]
+                who = arg or busy
+                if who not in names:
+                    return self.flash(f"no member called {who} · /show " + " · ".join(names), RED)
+                self.focus, self.overlay, self.show_who, self.show_scroll = False, "show", who, 0
             elif cmd == "quit":
                 self.focus = False
                 self.ask_quit()
@@ -2463,6 +2566,8 @@ class App:
             if self.overlay == "ask":
                 s.dim(sty(mix(DIM, BG, .35)))
                 self.draw_ask(t)
+            elif self.overlay == "show":
+                self.draw_show(t)
         if W >= 60 and H >= 18:
             if self.overlay in ("quit", "help", "chatintro"):
                 s.dim(sty(mix(DIM, BG, .35)))
@@ -2473,6 +2578,46 @@ class App:
             elif self.overlay == "help":
                 self.draw_help()
         s.flush()
+
+    def draw_show(self, t: float):
+        """A member's live card: what it does right now, step by step, as it happens (/show <member>)."""
+        s, W, H, c = self.scr, self.scr.w, self.scr.h, self.c
+        n = c.node(self.show_who)
+        bw, bh = min(110, W - 4), max(10, H - 6)
+        x0, y0 = (W - bw) // 2, 3
+        self.box(x0, y0, bw, bh, n.color)
+        now = time.time()
+        steps = c.activity.get(self.show_who, [])
+        since = c.work.get(self.show_who)
+        last = steps[-1][0] if steps else 0
+        x = s.put(x0 + 2, y0 + 1, "◉ " if since else "○ ", sty(n.color, bold=True) if since else sty(DIM))
+        x = s.put(x, y0 + 1, n.label(), sty(n.color, bold=True))
+        if n.role:
+            x = s.put(x, y0 + 1, " · " + n.role, sty(MUTED))
+        right = (f"working {dur(now - since)}" if since else n.state or "idle") + (f" · last step {ago(now - last)}" if last else "")
+        s.put(x0 + bw - 2 - tw(right), y0 + 1, right, sty(OK if since else MUTED))
+        if n.text:
+            s.put(x0 + 2, y0 + 2, fit(n.text, bw - 4), sty(INK))
+        s.put(x0 + 1, y0 + 3, "─" * (bw - 2), sty(DIM))
+        rows = bh - 6
+        icon = {"tool": ("▸", CYAN), "status": ("●", n.color), "message": ("✉", WHITE), "milestone": ("★", OK), "text": ("…", MUTED)}
+        lines = []
+        for when, kind, words, raw in steps:
+            ic, col = icon.get(kind, ("·", MUTED))
+            lines.append((datetime.fromtimestamp(when).strftime("%H:%M:%S"), ic, col, words, raw if kind == "tool" and raw != words else ""))
+        self.show_scroll = min(self.show_scroll, max(0, len(lines) - rows))
+        view = lines[max(0, len(lines) - rows - self.show_scroll):len(lines) - self.show_scroll] if lines else []
+        if not view:
+            s.put(x0 + 3, y0 + 5, f"nothing yet: {n.label()} hasn't done anything in this session so far", sty(MUTED))
+        for i, (hm, ic, col, words, raw) in enumerate(view):
+            y = y0 + 4 + i
+            xx = s.put(x0 + 2, y, hm + " ", sty(DIM))
+            xx = s.put(xx, y, ic + " ", sty(col, bold=True))
+            xx = s.put(xx, y, fit(words, x0 + bw - 3 - xx), sty(INK))
+            if raw and x0 + bw - 3 - xx > 12:
+                s.put(xx + 2, y, fit(raw, x0 + bw - 5 - xx), sty(DIM))
+        more = f"↑ {self.show_scroll} newer below" if self.show_scroll else ""
+        self.hints(y0 + bh - 2, [("d", "close"), ("←→", "another member"), ("↑↓", "scroll")] + ([(more, "")] if more else []), x=x0 + 2, w=bw - 4)
 
     def box(self, x: int, y: int, w: int, h: int, color, title: str = "", title_st: str = ""):
         s = self.scr
@@ -2755,9 +2900,14 @@ class App:
             badge, bc = "○ PAUSED · /continue resumes", MUTED
         else:
             badge, bc = "· linking", DIM
-        right = f"{badge}   {el}"
+        beat, beat_c = self.heartbeat()
+        beat = beat if W - x - tw(beat) - tw(badge) - tw(el) > 30 else ""      # the task keeps some room
+        right = (f"{beat}   " if beat else "") + f"{badge}   {el}"
         s.put(x + 2, 0, fit(c.task or "(no task yet: NAVI will ask)", W - x - 2 - tw(right) - 4), sty(INK, bold=True))
         rx = W - 1 - tw(right)
+        if beat:
+            s.put(rx, 0, beat, sty(beat_c, bold=True))
+            rx += tw(beat) + 3
         s.put(rx, 0, badge, sty(bc, bold=True))
         s.put(W - 1 - tw(el), 0, el, sty(INK))
         mod = c.mod or {}
@@ -2767,11 +2917,6 @@ class App:
         if c.perms in self.N.PERMISSION_WORDS:
             parts.append(("permissions", self.N.PERMISSION_WORDS[c.perms].lower()))
         ses = self.st.get("session") or {}
-        tok = sum(int(u.get(f) or 0) for src in ((ses.get("usage") or {}).get("models") or {}, ses.get("usage_live") or {})
-                  for u in src.values() for f in ("in", "out", "cache_read", "cache_write"))
-        if tok:
-            usd = (ses.get("cost") or {}).get("usd")
-            parts.append(("tokens", fmt_tok(tok) + (f" · ${usd:.2f}" if usd else "")))
         eid = ses.get("engine") or "claude"
         if eid != "claude":
             parts.insert(0, ("engine", self.eng(eid).get("name") or eid))
@@ -2802,6 +2947,18 @@ class App:
                 xx = p - i
                 if 0 <= xx < W:
                     s.put(xx, 2, "━" if i < 4 else "─", sty(mix(RED, DIM, i / 14)))
+
+    def heartbeat(self) -> tuple[str, tuple]:
+        """Who works right now, for how long, and how long since the last step: so a quiet council reads as working,
+        not stuck (and a stuck one shows it)."""
+        c = self.c
+        if not c or c.ended or not self.working():
+            return "", MUTED
+        now = time.time()
+        busy = max(((v, k) for k, v in c.work.items() if k in c.nodes), default=None)
+        since, who = busy if busy else (c.work.get("navi") or c.started or now, "navi")
+        quiet = now - (c.last_step or now)
+        return f"▸ {c.node(who).label()} · {dur(now - since)} · last step {ago(quiet)}", (AMBER if quiet > 120 else OK)
 
     def draw_feed(self, x: int, y: int, w: int, h: int):
         s, c = self.scr, self.c

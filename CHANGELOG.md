@@ -3,6 +3,25 @@
 NAVI's versions are **MAJOR.MINOR.BUILD**. BUILD has three digits and counts every release (0.9.001, 0.9.002, ...);
 1.0.000 is the public launch. `navi update` brings your copy to the newest release, `navi --version` says which you have.
 
+## 0.9.022 (2026-10-11)
+
+- **You see what the council does while it works.**
+  - **A heartbeat** in the header (TUI and browser): who works, for how long, and how long since its last step,
+    in amber when it has been quiet for a while.
+  - **A member's live card:** `/show <member>` in the TUI (`d` closes it, ←→ the next member), a click on the member
+    in the browser (click again to close). Its steps as they happen, in words, with its statuses, files and messages.
+    NAVI now knows which member made each step (a subagent by the call that started it; the moderator's own work as
+    the member it works as).
+  - **Milestones:** `navi milestone "<what's done> · <what's next>"` puts where things stand in the feed. The moderator
+    is told to post one at each milestone, and reminded when you haven't heard from the council for five minutes.
+- **What you write reaches the moderator at once.** It's put in front of it right after its next tool call (in a
+  real council it used to wait until the moderator chose to look: five minutes on average, twelve at worst), and your
+  message shows **seen ✓** once it has it.
+- **No more token count** in the header or the summary: it counted cached re-reads again and again. The cost per
+  model is still on hover.
+- The council's own files are tracked better: variables it set in the same command, `curl -o` and `wget -O`
+  downloads; no more junk like `$D/...` or `/dev/null` in the list.
+
 ## 0.9.021 (2026-10-09)
 
 - **A fresh start for the repository.** NAVI's GitHub history begins here; this changelog still tells every version's

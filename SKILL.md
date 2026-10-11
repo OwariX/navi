@@ -70,6 +70,11 @@ model and everything above already in its instructions.
   architecture, costs real money, deletes something, or the task is genuinely ambiguous.
 - Every persona turn starts with `navi status <agent> "..." --state working` and ends with `--state done`.
   Long silence looks like a crash.
+- **Tell the user where things stand.** Statuses only change a member's line on the graph; the feed is what the user
+  reads. At each milestone (the plan is agreed, a big part is built, the build is done, the reviews are in, the fixes
+  are done) run `navi milestone "<what's done> · <what's next>"`, one line. NAVI reminds you when the user has heard
+  nothing for five minutes. What the user writes while you work is put in front of you after your next tool call:
+  act on it then, not at the end.
 - Run the reviewers **in parallel**, all in one batch, one subagent each. When the brief says the members are
   registered, spawn each as `subagent_type: "<name>"`: its instructions, model and effort are already set. Otherwise give
   it `navi prompt <agent>` and the model from the brief ("inherit" means your own model; councils often seat reviewers on

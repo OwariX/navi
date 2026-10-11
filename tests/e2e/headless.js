@@ -63,7 +63,20 @@ const R = []; const check = (n, ok, x = '') => R.push(`${ok ? 'PASS' : 'FAIL'}  
     defs.adversary?.model === 'sonnet' && defs.scribe?.model === 'haiku' && defs.architect?.model === 'inherit'
     && Object.values(defs).every(d => d.effort === 'low' && /NAVI rules/.test(d.prompt) && /MCP server obsidian/.test(d.prompt)) && Object.keys(defs).length === 5,
     JSON.stringify(Object.fromEntries(Object.entries(defs).map(([k, v]) => [k, `${v.model}/${v.effort}`]))));
-  check('tokens show in the session header while it runs', await waitFor(async () => /tokens/.test(await page.textContent('#meta')), 10000), await page.textContent('#meta'));
+  check('no token count in the session header (it counted cached re-reads over and over: noise)', !/tokens/.test(await page.textContent('#meta')), await page.textContent('#meta'));
+  check('the heartbeat: who works, for how long, the last step', await waitFor(async () => /▸ .+ · \d+:\d\d · last step \d+ (s|min) ago/.test(await page.textContent('#beat')), 10000),
+    await page.textContent('#beat'));
+  // a member's live card: click it on the graph, what it does right now; click it again to close
+  const at = await page.evaluate(() => { const n = nodes.get('architect'); return n ? [n.dx, n.dy] : null; });
+  if (at) await page.mouse.click(at[0], at[1]);
+  await sleep(400);
+  const live = await page.evaluate(() => ({shown: $('#nodecard').classList.contains('show'), head: $('#nodecard .lh')?.textContent || '',
+    steps: [...document.querySelectorAll('#nodecard .live .s')].map(e => e.textContent)}));
+  check('click a member: its live card, with its steps as they happen', live.shown && /Live/.test(live.head) && live.steps.length >= 1, JSON.stringify(live).slice(0, 300));
+  await page.screenshot({ path: `${out}/headless-live-card.png` });
+  if (at) await page.mouse.click(at[0], at[1]);
+  await sleep(300);
+  check('...click it again: closed', !(await page.evaluate(() => $('#nodecard').classList.contains('show'))));
   await page.click('#modPill'); await sleep(700);
   const rows = await page.$$eval('#tracelist .t', els => els.map(e => e.textContent.slice(0, 40)));
   check('the NAVI card shows what Claude is doing', rows.length >= 2, rows.join(' | '));
@@ -73,7 +86,7 @@ const R = []; const check = (n, ok, x = '') => R.push(`${ok ? 'PASS' : 'FAIL'}  
   const cost = await waitFor(async () => /\$0\.42/.test(await page.textContent('#sumCost')), 15000);
   const sumCost = await page.textContent('#sumCost');
   check('CONSENSUS shows how long it took, turns and cost', cost && /Done in \d+:\d\d/.test(sumCost), sumCost);
-  check('...and the tokens, per model as Claude Code counted them', /70k tokens/.test(sumCost) && /Opus 5: .*cached.*\$0\.30/.test(await page.getAttribute('#sumCost', 'title')) && /Sonnet 5\.5/.test(await page.getAttribute('#sumCost', 'title')),
+  check('...no token count, the cost per model on hover', !/tokens/.test(sumCost) && /Opus 5: .*\$0\.30/.test(await page.getAttribute('#sumCost', 'title')) && /Sonnet 5\.5/.test(await page.getAttribute('#sumCost', 'title')),
     `${sumCost} | ${await page.getAttribute('#sumCost', 'title')}`);
   check('the idle background moderator is told to leave after the end', /stop now/.test(fs.readFileSync(fakeLog, 'utf8')));
   const fin = await waitFor(async () => (await page.evaluate(() => hub.status && hub.status.text)) === 'finished', 8000);
