@@ -49,8 +49,9 @@ body.flicker{animation:flicker 7s infinite steps(1)}
 @keyframes flicker{0%,100%{opacity:1}31%{opacity:.96}32%{opacity:1}77%{opacity:.95}78%{opacity:1}}
 #noise{opacity:var(--grain);image-rendering:pixelated;pointer-events:none;mix-blend-mode:screen;z-index:48}
 .scan{position:fixed;inset:0;pointer-events:none;z-index:50;background:repeating-linear-gradient(0deg,rgba(0,0,0,var(--scan)) 0 1px,transparent 1px 3px)}
-.scan::after{content:"";position:absolute;left:0;right:0;height:120px;top:-120px;background:linear-gradient(180deg,transparent,rgba(255,255,255,.02),transparent);animation:roll 9s linear infinite}
-@keyframes roll{to{top:100%}}
+/* the rolling band is moved by the graph's own frames (--roll, set in frame()): a CSS animation of its own made the
+   browser repaint the whole screen on every refresh, 120 times a second on a 120 Hz screen */
+.scan::after{content:"";position:absolute;left:0;right:0;height:120px;top:0;transform:translateY(var(--roll,-120px));background:linear-gradient(180deg,transparent,rgba(255,255,255,.02),transparent)}
 .vig{position:fixed;inset:0;pointer-events:none;z-index:49;background:radial-gradient(ellipse at 45% 50%,transparent 50%,rgba(0,0,0,var(--vig)))}
 .glitch{position:relative;display:inline-block}
 body.flicker .glitch::before,body.flicker .glitch::after{content:attr(data-text);position:absolute;top:0;left:0;width:100%;overflow:hidden;pointer-events:none}
@@ -1171,7 +1172,7 @@ body:not(.session) #side,body:not(.session) #hdr,body:not(.session) #console,bod
 :root[data-theme="glass"] body::before{content:"";position:fixed;inset:-18%;z-index:0;pointer-events:none;will-change:transform;
   background:radial-gradient(34% 40% at 16% 20%,rgba(118,76,255,.6),transparent 70%),radial-gradient(30% 36% at 86% 12%,rgba(255,62,150,.44),transparent 70%),
     radial-gradient(38% 44% at 80% 90%,rgba(0,176,255,.4),transparent 70%),radial-gradient(30% 34% at 12% 88%,rgba(255,136,60,.3),transparent 70%),var(--bg);
-  animation:glass-drift 50s ease-in-out infinite alternate}
+  animation:glass-drift 50s steps(50) infinite alternate}      /* in steps: a smooth drift repaints the whole screen 120 times a second */
 @keyframes glass-drift{50%{transform:translate3d(3%,-2%,0) rotate(5deg) scale(1.05)}100%{transform:translate3d(-2%,3%,0) rotate(-4deg) scale(1.03)}}
 :root[data-theme="glass"] #stage{mix-blend-mode:screen}
 :root[data-theme="glass"] .scan{display:none}
@@ -1611,7 +1612,7 @@ body:not(.session) #side,body:not(.session) #hdr,body:not(.session) #console,bod
     radial-gradient(circle at 151px 40px,color-mix(in srgb,var(--star) 55%,transparent) 0 .6px,transparent 1.1px) 0 0/311px 263px,
     radial-gradient(circle at 286px 236px,color-mix(in srgb,var(--gilt) 85%,transparent) 0 .9px,transparent 1.6px) 0 0/311px 263px;
   opacity:.62;-webkit-mask-image:linear-gradient(180deg,#000 30%,rgba(0,0,0,.4));mask-image:linear-gradient(180deg,#000 30%,rgba(0,0,0,.4));
-  animation:journey-sky 11s ease-in-out infinite alternate}
+  animation:journey-sky 11s steps(11) infinite alternate}      /* in steps: a smooth fade repaints the whole screen 120 times a second */
 @keyframes journey-sky{to{opacity:.4}}
 :root[data-theme="journey"] #stage{mix-blend-mode:lighten}
 :root[data-theme="journey"] ::selection{background:color-mix(in srgb,var(--accent) 30%,transparent);color:var(--fg)}
@@ -2894,7 +2895,7 @@ function drawWires(t){
     g.beginPath();
     for (let i = 0; i <= 28; i++){ const [x, y] = qpt(L.a, L.b, L.bend, i / 28); i ? g.lineTo(x, y) : g.moveTo(x, y); }
     g.stroke();
-    L.heat = Math.max(L.heat * .994, .14);
+    L.heat = Math.max(L.heat * decay(.994), .14);
   }
   g.globalAlpha = 1;
 }
@@ -2928,7 +2929,7 @@ function drawBeacon(o, x, y, t){
 }
 function drawPerimeter(t){
   if (!guard.on) return;
-  const [rx, ry] = ringRadii(), R = rx + 64, Ry = ry + 64, f = guard.flash; guard.flash *= .96;
+  const [rx, ry] = ringRadii(), R = rx + 64, Ry = ry + 64, f = guard.flash; guard.flash *= decay(.96);
   g.strokeStyle = f > .05 ? guard.color : TH.ok;
   g.globalAlpha = .1 + f * .6; g.lineWidth = 1 + f * 2;
   g.setLineDash([10, 8]); g.lineDashOffset = t * 6;
@@ -2944,7 +2945,7 @@ function drawPerimeter(t){
   g.textAlign = 'left'; if (hub.x + R + 10 + g.measureText(lbl).width < W - 8) g.fillText(lbl, hub.x + R + 10, hub.y + 3);   // only where it fits
 }
 function drawHub(t){
-  const x = hub.x, y = hub.y, p = hub.pulse; hub.pulse *= .95;
+  const x = hub.x, y = hub.y, p = hub.pulse; hub.pulse *= decay(.95);
   g.lineWidth = 1;
   for (let i = 0; i < 3; i++){
     const r = 30 + i * 13 + p * 8, a0 = t * (.35 + i * .22) * (i % 2 ? -1 : 1);
@@ -2969,10 +2970,10 @@ function drawHub(t){
   drawLock(hub, x, y);
 }
 function drawNode(n, t){
-  n.x += (n.tx - n.x) * .05; n.y += (n.ty - n.y) * .05;
+  const ease = 1 - decay(.95); n.x += (n.tx - n.x) * ease; n.y += (n.ty - n.y) * ease;
   const st = n.status, off = st?.state === 'offline';    // the council is done: grey, still, no glow, struck through
   n.dx = off ? n.x : n.x + Math.sin(t * .7 + n.phase) * 4; n.dy = off ? n.y : n.y + Math.cos(t * .53 + n.phase) * 4;
-  const c = off ? inkA(.32) : colorOf(n.id), x = n.dx, y = n.dy, p = off ? 0 : n.pulse; n.pulse *= .95;
+  const c = off ? inkA(.32) : colorOf(n.id), x = n.dx, y = n.dy, p = off ? 0 : n.pulse; n.pulse *= decay(.95);
   const dimmed = hoverId && hoverId !== n.id && hoverId !== 'navi';
   g.globalAlpha = dimmed ? .45 : 1;
   g.strokeStyle = c; g.fillStyle = c; g.lineWidth = 1;
@@ -3043,10 +3044,19 @@ function drawNoise(){
   for (let i = 0; i < d.length; i += 4){ const v = Math.random() * 255 | 0; d[i] = d[i+1] = d[i+2] = v; d[i+3] = 255; }
   ng.putImageData(nimg, 0, 0);
 }
-let last = performance.now(), frameN = 0;
+let last = performance.now(), frameN = 0, drawnAt = 0;
 // behind a panel (Settings, Themes, a sheet) the graph is blurred out: redraw it a few times a second, not 60, and let
 // the theme's moving backdrop rest. Otherwise every frame re-blurs the whole screen under the panel, and scrolling lags.
 let covered = false;
+// The graph is drawn 30 times a second at most. A 120 Hz screen asked for it 120 times, each time the whole
+// retina-sized canvas re-blended and re-blurred under the panels: two CPU cores in the browser, and the fans spun.
+// `step` is the frames' worth of time since the last drawing (at 60 a second), so fades and moves keep their speed.
+// While you're in another window it is drawn 10 times a second: it still moves, at a third of the cost.
+const DRAW_GAP = 1000 / 30 - 4, AWAY_GAP = 1000 / 10 - 4, scanEl = document.querySelector('.scan');
+let step = 1, away = !document.hasFocus();
+addEventListener('focus', () => { away = false; });
+addEventListener('blur', () => { away = true; });
+const decay = k => Math.pow(k, step);
 function frame(now){
   const n = frameN++;
   if ((n & 7) === 0){
@@ -3054,13 +3064,16 @@ function frame(now){
     if (c !== covered){ covered = c; document.documentElement.classList.toggle('covered', c); }
   }
   pump(now);                                    // events keep flowing either way
-  if (covered && n % 12){ requestAnimationFrame(frame); return; }
-  const dt = Math.min(.05, (now - last) / 1000), t = now / 1000; last = now;
-  g.fillStyle = rgba(TH.bg, .34); g.fillRect(0, 0, W, H);
+  if ((covered && n % 12) || now - drawnAt < (away ? AWAY_GAP : DRAW_GAP)){ requestAnimationFrame(frame); return; }
+  drawnAt = now;
+  const dt = Math.min(.1, (now - last) / 1000), t = now / 1000; last = now;
+  step = dt * 60;
+  g.fillStyle = rgba(TH.bg, 1 - decay(.66)); g.fillRect(0, 0, W, H);
   drawPowerLines(t); drawPerimeter(t); drawWires(t); drawHub(t);
   for (const nd of nodes.values()) drawNode(nd, t);
   drawPackets(dt);
-  if ((n & 1) === 0) drawNoise();
+  drawNoise();
+  scanEl?.style.setProperty('--roll', ((t % 9) / 9 * (H + 120) - 120).toFixed(1) + 'px');   // the band rolls down every 9 s
   requestAnimationFrame(frame);
 }
 
