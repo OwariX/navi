@@ -4,6 +4,8 @@
 #   FAKE_SLEEP seconds to "work" (default 5)
 #   FAKE_END=1 close the session at the end (so a headless supervisor sees it finished)
 #   FAKE_LISTEN=1 then `navi listen` like the real moderator (NAVI_AFTER_END_WAIT keeps that short)
+#   FAKE_NAP=<s> instead: start a member in the background, end the turn on a wake-up timer, sleep <s> seconds
+#                (logs "napping", and "woke: <prompt>" when NAVI restarts it)
 #   FAKE_PERMIT=1 run three commands nothing allowed: like the real CLI in -p, each goes to the PermissionRequest hook
 #                 from --settings (NAVI's `permit`), which waits for the user's answer in NAVI
 # With --output-format stream-json it prints the same kind of lines the real CLI does (init, tool calls, result + cost).
@@ -103,6 +105,16 @@ You check one thing well and leave design and building to the lead.
 EOF
     exit 0;;
 esac
+if [ -n "$FAKE_NAP" ]; then     # ends its turn on a wake-up timer (ScheduleWakeup) as the real one does: the result, then asleep
+  case "$1" in *"NAVI woke you"*) echo "woke: $1" >> "$LOG";; esac
+  tool "navi brief"; navi brief >> "$LOG" 2>&1
+  say '{"type":"assistant","message":{"content":[{"type":"tool_use","id":"toolu_fake_rev","name":"Agent","input":{"subagent_type":"adversary","description":"ADVERSARY reviews","run_in_background":true}}]}}'
+  say '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"ScheduleWakeup","input":{"delaySeconds":1800,"reason":"fake: waiting for the user"}}]}}'
+  say '{"type":"result","subtype":"success","total_cost_usd":0.01,"duration_ms":1000,"num_turns":2,"result":"asleep"}'
+  echo "napping" >> "$LOG"
+  sleep "$FAKE_NAP" > /dev/null 2>&1 < /dev/null & wait $!
+  echo "nap over" >> "$LOG"; exit 0
+fi
 case "$1" in *"listen --timeout 0"*)     # woken by NAVI for a message after the end: read it, done
   tool "navi listen --timeout 0"; navi listen --timeout 0 >> "$LOG" 2>&1; echo "followup handled" >> "$LOG"
   navi chat "fake reply: done, the title is bigger now (index.html)" >> "$LOG" 2>&1     # chat mode: one agent answers directly

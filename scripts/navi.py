@@ -1628,34 +1628,10 @@ def cmd_posthook(a):
     sd = Path(nd) / "sessions" / str((h or {}).get("session") or "-")
     if not h or not (sd / "log.jsonl").exists():
         return
-    try:
-        st = json.loads((sd / "pushed.json").read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        st = {}
-    box, sent, notes = sd / "inbox" / "navi", set(st.get("files") or []), []
-    new = [p for p in sorted(box.glob("*-user.md")) if p.name not in sent] if box.is_dir() else []
+    notes, new, st = unheard(sd, epoch_of(h.get("started")) if h.get("started") else 0.0)
     if new:
-        texts = [p.read_text(encoding="utf-8").split("\n---\n", 1)[-1].strip()[:1500] for p in new[:5]]
-        notes.append("The user just wrote to you while you work. It may change what you're doing: act on it now, then run "
-                     "`navi inbox navi` to mark it read.\n" + "\n\n".join("> " + t.replace("\n", "\n> ") for t in texts))
-        st["files"] = sorted(sent | {p.name for p in new})[-200:]
         mark_seen(sd, new)
     evs = read_events(sd / "log.jsonl")
-    nowait = {str(e.get("id")): e for e in evs if e.get("type") == "ask" and e.get("nowait")}   # nobody waits on these
-    done_r = set(st.get("replies") or [])
-    for qid, q in nowait.items():
-        f = sd / "replies" / f"{qid}.json"
-        if qid in done_r or not f.exists():
-            continue
-        try:
-            r = json.loads(f.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            continue
-        said = " · ".join(x for x in (str(r.get("choice") or ""), str(r.get("text") or "")) if x)[:1500]
-        notes.append(f"The user answered your question \"{str(q.get('body') or '')[:200]}\": {said}. If it changes what "
-                     "you're doing, change course now.")
-        st["replies"] = sorted(done_r | {qid})[-200:]
-        done_r.add(qid)
     if not any(e.get("type") == "end" for e in evs):
         said = [e for e in evs if e.get("type") in ("milestone", "chat", "ask", "boot")
                 or (e.get("type") == "message" and e.get("agent") != "user")]
@@ -1670,6 +1646,110 @@ def cmd_posthook(a):
         print(json.dumps({"hookSpecificOutput": {"hookEventName": "PostToolUse", "additionalContext": "\n\n".join(notes)[:9000]}}))
     elif new:
         write_atomic(sd / "pushed.json", json.dumps(st))
+
+
+def pushed_state(sd: Path) -> dict:
+    """pushed.json: the user's messages ("files") and answers ("replies") the moderator already has, each handed over once."""
+    try:
+        st = json.loads((sd / "pushed.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        st = {}
+    return st if isinstance(st, dict) else {}
+
+
+def remember_pushed(sd: Path, replies=()) -> None:
+    st = pushed_state(sd)
+    st["replies"] = sorted(set(st.get("replies") or []) | set(replies))[-200:]
+    try:
+        write_atomic(sd / "pushed.json", json.dumps(st))
+    except OSError:
+        pass
+
+
+def unheard(sd: Path, since: float = 0.0) -> tuple[list[str], list[Path], dict]:
+    """What the user said that the moderator doesn't have yet, in words for it: console messages to it nobody read or
+    handed over, and answers to its questions that `navi ask`/`navi wait` didn't give it (--no-wait, or it stopped
+    waiting) since `since`, its start. -> (notes, the new message files, pushed.json with them marked: write it once
+    they're delivered)."""
+    st = pushed_state(sd)
+    box, sent, notes = sd / "inbox" / "navi", set(st.get("files") or []), []
+    new = [p for p in sorted(box.glob("*-user.md")) if p.name not in sent] if box.is_dir() else []
+    if new:
+        texts = [p.read_text(encoding="utf-8").split("\n---\n", 1)[-1].strip()[:1500] for p in new[:5]]
+        notes.append("The user just wrote to you while you work. It may change what you're doing: act on it now, then run "
+                     "`navi inbox navi` to mark it read.\n" + "\n\n".join("> " + t.replace("\n", "\n> ") for t in texts))
+        st["files"] = sorted(sent | {p.name for p in new})[-200:]
+    done_r = set(st.get("replies") or [])
+    for q in read_events(sd / "log.jsonl"):
+        qid = str(q.get("id") or "")
+        f = sd / "replies" / f"{qid}.json"
+        if q.get("type") != "ask" or qid in done_r or not f.exists():
+            continue
+        try:
+            r = json.loads(f.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if not q.get("nowait") and epoch_of(r.get("ts")) < since:    # answered before this run: it had it at the time
+            continue
+        said = " · ".join(x for x in (str(r.get("choice") or ""), str(r.get("text") or "")) if x)[:1500]
+        notes.append(f"The user answered your question \"{str(q.get('body') or '')[:200]}\": {said}. If it changes what "
+                     "you're doing, change course now.")
+        done_r.add(qid)
+        st["replies"] = sorted(done_r)[-200:]
+    return notes, new, st
+
+
+WAKE_POLL = float(os.environ.get("NAVI_WAKE_POLL") or 3)        # seconds between looks at a background moderator
+WAKE_GRACE = float(os.environ.get("NAVI_WAKE_GRACE") or 8)      # a turn's result this old, and it still runs: it's asleep
+WAKE_PROMPT = ("NAVI woke you: the user wrote while you were asleep on a wake-up timer (asleep, nothing they write "
+               "reaches you until it fires). Carry on with the NAVI session on this conversation, starting with what they said:")
+
+
+def asleep(trace: Path) -> bool:
+    """A background moderator that ended its turn and waits on a wake-up timer (Claude Code's ScheduleWakeup): the
+    last line of its trace is that turn's result, a few seconds old. Claude Code holds a turn's result back while
+    members it started still work in the background, so none of them runs either."""
+    try:
+        with open(trace, "rb") as f:
+            f.seek(0, 2)
+            f.seek(max(0, f.tell() - 8192))
+            last = json.loads(f.read().decode("utf-8", "replace").strip().splitlines()[-1])
+    except (OSError, ValueError, IndexError):
+        return False
+    return isinstance(last, dict) and last.get("kind") == "result" and time.time() - epoch_of(last.get("ts")) >= WAKE_GRACE
+
+
+def wake_when_spoken_to(P: Path, hid: str, state: dict, alive) -> None:
+    """Asleep on a wake-up timer, a moderator hears nothing: Claude Code wakes it when the timer fires or a member it
+    started finishes, never for the user (in a real council: half an hour of "NAVI picks it up next"). When the user
+    writes to it or answers its question meanwhile, restart it on the same conversation with what they said."""
+    while alive():
+        time.sleep(WAKE_POLL)
+        try:
+            h, p = read_host(P, hid), state.get("proc")
+            if not h or not p or p.poll() is not None or not asleep(state["trace"]):
+                continue
+            sd = P / "sessions" / str(h.get("session") or "-")
+            names = set(getattr(state.get("parser"), "subs", {}).values())
+            last = {e.get("agent"): e.get("state") for e in read_events(sd / "log.jsonl") if e.get("type") == "status"}
+            if any(last.get(n) == "working" for n in names):      # a member it started says it's still at work
+                continue
+            notes, new, st = unheard(sd, epoch_of(h.get("started")))
+            rl = P / "hosts" / f"{hid}.relaunch.json"
+            req = json.loads(rl.read_text(encoding="utf-8")) if rl.exists() else {}
+            if not notes or req.get("stop"):
+                continue
+            write_atomic(rl, json.dumps({"model": state["model"], "effort": state["effort"], **req, "ts": now(),
+                                         "wake": WAKE_PROMPT + "\n\n" + "\n\n".join(notes)}))
+            write_atomic(sd / "pushed.json", json.dumps(st))
+            if new:
+                mark_seen(sd, new)
+            with in_session(sd):
+                emit({"type": "host", "host": h.get("host", ""), "model": state["model"], "effort": state["effort"],
+                      "body": "NAVI was asleep on a timer and didn't hear you · waking it on the same conversation"})
+            os.kill(p.pid, 15)
+        except Exception:
+            continue
 
 
 def epoch_of(ts) -> float:
@@ -2187,6 +2267,7 @@ def _await_reply(d: Path, qid: str, timeout: float):
             die(f"no answer yet - keep waiting with `navi.py wait {qid}`", TIMEOUT_EXIT)
         time.sleep(0.4)
     r = json.loads(f.read_text(encoding="utf-8"))
+    remember_pushed(d, replies=[qid])       # whoever waited has it: nothing hands it over again
     print(f"choice: {r.get('choice') or '-'}")
     print(f"text: {r.get('text') or '-'}")
 
@@ -3825,7 +3906,7 @@ def spawn_headless(P: Path, sid: str, host: str, model: str, prompt: str, effort
                                                               **({"NAVI_AGENTS": "1"} if agents else {})},
                                  stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=lf, start_new_session=True)
         trace = P / "hosts" / f"{sid}.trace.jsonl"
-        state["parser"] = eng.stream(eng.resolve(load_config(), state["model"]))
+        state["parser"], state["proc"], state["trace"] = eng.stream(eng.resolve(load_config(), state["model"])), p, trace
         def keep_thread(c: str):
             state["csid"] = c
             remember_conversation(P / "sessions" / sid, c, host)
@@ -3860,7 +3941,8 @@ def spawn_headless(P: Path, sid: str, host: str, model: str, prompt: str, effort
                     state["model"] = req.get("model", state["model"])
                     state["effort"] = req.get("effort", state["effort"])
                     state["allow"] = list(dict.fromkeys(state["allow"] + list(req.get("allow") or [])))
-                    state["prompt"] = RESTART_PROMPT.format(why=f" on model {state['model'] or 'default'}, effort {state['effort'] or 'default'}, at the user's request")
+                    state["prompt"] = str(req.get("wake") or "") or RESTART_PROMPT.format(
+                        why=f" on model {state['model'] or 'default'}, effort {state['effort'] or 'default'}, at the user's request")
                 elif ended and unread_from_user(P / "sessions" / sid) and sid not in live_sessions(P) and state["followups"] < 3:
                     state["followups"] += 1      # the user wrote while it was leaving: come back on the same conversation
                     state["prompt"] = FOLLOWUP_PROMPT
@@ -3889,6 +3971,8 @@ def spawn_headless(P: Path, sid: str, host: str, model: str, prompt: str, effort
 
     sup = threading.Thread(target=supervise, daemon=True)
     sup.start()
+    if eng.program == "claude":         # only Claude Code has wake-up timers
+        threading.Thread(target=wake_when_spoken_to, args=(P, hid, state, sup.is_alive), daemon=True).start()
     if not eng.can["subagents"]:          # its `navi run` may come from inside Codex's sandbox: members start here
         threading.Thread(target=serve_member_runs, args=(P, hid, sup.is_alive), daemon=True).start()
     for _ in range(50):          # wait for the host file so the caller (and the UI) sees it immediately

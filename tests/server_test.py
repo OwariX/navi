@@ -331,6 +331,20 @@ try:
     check("make it light, not dark" in ctx and "Plan: a dark one-page site" in ctx and "change course" in ctx,
           "...and your answer is put in front of it after its next tool call", ctx[:300])
     check("make it light" not in posthook(), "...once")
+    # a question it stopped waiting on (`navi ask` timed out): your answer reaches it after its next tool call as well;
+    # one that `navi wait` gave it is never handed over again
+    def ask_wait(question, extra=()):
+        r = subprocess.run([sys.executable, navi, "ask", "--from", "navi", "--question", question, "--option", "Done",
+                            "--option", "Needs changes", "--timeout", "0.5", *extra], env=henv, cwd=proj, capture_output=True, text=True, timeout=30)
+        return r.stdout.split("(id ", 1)[1].split(")", 1)[0] if "(id " in r.stdout else ""
+    qid3 = ask_wait("Is the dark page done?")
+    post_json("/reply", {"session": wsid, "id": qid3, "choice": "Needs changes", "text": "a bigger title"})
+    ctx = (json.loads(posthook() or "{}").get("hookSpecificOutput") or {}).get("additionalContext", "")
+    check("a bigger title" in ctx and "Is the dark page done?" in ctx, "an answer to a question it stopped waiting on reaches it after its next tool call", ctx[:300])
+    qid4 = ask_wait("Is the light page done?")
+    post_json("/reply", {"session": wsid, "id": qid4, "choice": "Done", "text": "ship the light one"})
+    w = subprocess.run([sys.executable, navi, "wait", qid4], env=henv, cwd=proj, capture_output=True, text=True, timeout=30).stdout
+    check("ship the light one" in w and "ship the light one" not in posthook(), "...one `navi wait` gave it is not handed over again", w)
     time.sleep(1.5)                      # (the question just asked counts as a word to the user)
     nudge = posthook(NAVI_QUIET_FOR="1")
     check("hasn't heard from the council" in nudge and "navi milestone" in nudge, "a moderator quiet for a while is reminded to tell you where things stand", nudge[:300])
@@ -365,6 +379,51 @@ try:
     json.dump({"id": "abcd1234", "pid": keeper.pid, "mode": "headless", "session": open(f"{proj}/.navi/current").read().strip()}, open(f"{proj}/.navi/hosts/abcd1234.json", "w"))
     check('"ask"' in hook(grep_tf), "a new session starts asking again")
     os.remove(f"{proj}/.navi/hosts/abcd1234.json"); keeper.kill()
+    # asleep on a wake-up timer, a background moderator hears nothing until it fires (half an hour, in a real council):
+    # what you write to it, or your answer to a question it stopped waiting on, wakes it on the same conversation
+    from pathlib import Path as _P3
+
+    def wait_for(fn, secs):
+        end = time.time() + secs
+        while time.time() < end:
+            if fn():
+                return True
+            time.sleep(.2)
+        return False
+    run("init", "--task", "nap test", "--reset")
+    nsid, nlog = open(f"{proj}/.navi/current").read().strip(), f"{sp}/nap.log"
+    open(nlog, "w").close()
+    nap = lambda: open(nlog).read()
+    os.environ.update({"FAKE_NAP": "60", "FAKE_LOG": nlog})
+    N.WAKE_POLL, N.WAKE_GRACE = 0.3, 1.0
+    N.spawn_headless(_P3(f"{proj}/.navi"), nsid, "claude", "", "start the nap test", "")
+    check(wait_for(lambda: nap().count("napping") == 1, 20), "the fake moderator ends its turn on a wake-up timer", nap()[-300:])
+    run("status", "adversary", "reviewing the page", "--state", "working")
+    post_json("/say", {"session": nsid, "text": "make the buttons round"})
+    time.sleep(2.5)
+    check("woke:" not in nap(), "a member it started is still at work: NAVI leaves it be (the member's result wakes it)")
+    run("status", "adversary", "verdict sent", "--state", "done")
+    check(wait_for(lambda: "woke:" in nap(), 15) and "make the buttons round" in nap().split("woke:", 1)[-1],
+          "asleep on a timer, NAVI wakes for your message, with your words", nap()[-600:])
+    check("[--resume]" in nap().split("woke:", 1)[0].rsplit("argv:", 1)[-1], "...on the same conversation (--resume)")
+    nev = [json.loads(x) for x in open(f"{proj}/.navi/sessions/{nsid}/log.jsonl") if x.strip()]
+    useq = next(e["seq"] for e in reversed(nev) if e["type"] == "message" and e.get("agent") == "user")
+    check(any(e["type"] == "host" and "asleep" in (e.get("body") or "") for e in nev) and
+          any(e["type"] == "seen" and useq in (e.get("seqs") or []) for e in nev), "...the feed says so, and your message shows seen")
+    check(wait_for(lambda: nap().count("napping") == 2, 20), "...it goes back to sleep", nap()[-300:])
+    r = run("ask", "--from", "navi", "--question", "Is the round page done?", "--option", "Done", "--option", "Needs changes", "--timeout", "0.5")
+    qid5 = r.stdout.split("(id ", 1)[1].split(")", 1)[0] if "(id " in r.stdout else ""
+    post_json("/reply", {"session": nsid, "id": qid5, "choice": "Needs changes", "text": "a softer blue"})
+    check(wait_for(lambda: nap().count("woke:") == 2, 15) and "a softer blue" in nap().rsplit("woke:", 1)[-1],
+          "...and wakes for your answer to a question it stopped waiting on", nap()[-600:])
+    check(wait_for(lambda: nap().count("napping") == 3, 20) and not wait_for(lambda: nap().count("woke:") > 2, 3),
+          "...and never without something new from you")
+    for hf in _P3(f"{proj}/.navi/hosts").glob("*.json"):
+        h = json.load(open(hf))
+        if h.get("session") == nsid and not hf.name.endswith(".relaunch.json"):
+            json.dump({"stop": True}, open(hf.parent / f"{hf.stem}.relaunch.json", "w"))
+            os.kill(h["pid"], 15)
+    os.environ.pop("FAKE_NAP")
     # removing sessions: the ended ones, one, all (open ones end first); files in the project stay
     run("init", "--task", "remove me open", "--reset")
     keep_file = f"{proj}/project-file.txt"
