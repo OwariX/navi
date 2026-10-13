@@ -3,6 +3,17 @@
 NAVI's versions are **MAJOR.MINOR.BUILD**. BUILD has three digits and counts every release (0.9.001, 0.9.002, ...);
 1.0.000 is the public launch. `navi update` brings your copy to the newest release, `navi --version` says which you have.
 
+## 0.9.023 (2026-10-13)
+
+- **NAVI wakes when you write, even when it's asleep.** A background moderator that waits on a wake-up timer
+  (after asking you something, or while members work) heard nothing until the timer fired: in a real council your
+  messages waited half an hour behind "NAVI picks it up next". Now NAVI restarts it on the same conversation with
+  what you wrote, at once (unless a member it started is still at work; that member finishing wakes it anyway).
+- **Your answer to a question NAVI stopped waiting on** reaches it after its next step, like your messages do.
+- **Quieter fans.** The page asked too much of the browser (Firefox on a 120 Hz screen especially): the graph now
+  draws at most 30 times a second (10 when the tab is in the background), and the sky and the scan line no longer
+  repaint the whole screen on every refresh.
+
 ## 0.9.022 (2026-10-11)
 
 - **You see what the council does while it works.**
